@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+env/
+.env
+
+# Sensitive files (don't upload these!)
+*.csv
+*.json
+credentials.json
+token.json
+admin_password.json
+
+# IDE files
+.vscode/
+.DS_Store
+
+# Backups
+*.backup
+backups_*/
+*.zip

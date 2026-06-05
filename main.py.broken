@@ -1,0 +1,881 @@
+from fastapi import FastAPI, Form, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+import os
+import csv
+from datetime import datetime
+import pytz
+
+app = FastAPI(title="My Music Studio Automation")
+
+# Import schedule feature
+from schedule_feature import add_schedule_routes
+
+# Authentication
+from auth import init_users, authenticate_user, create_login_middleware, get_login_page
+from fastapi import Cookie
+import json
+
+# Initialize users file
+init_users()
+
+
+SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
+LEDGER_FILE = "studio_ledger.csv"
+PROFILES_FILE = "student_profiles.csv"
+PRICING_FILE = "pricing_tiers.csv"
+DEFAULT_RATE = 50.00
+
+# --- SHARED DATA PIPELINES ---
+def get_google_calendar_events():
+    """Get today's events from Google Calendar with proper error handling"""
+    try:
+        from google.auth.transport.requests import Request
+        from google.oauth2.credentials import Credentials
+        from google_auth_oauthlib.flow import InstalledAppFlow
+        from googleapiclient.discovery import build
+        from datetime import datetime
+        import pytz
+        
+        SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
+        creds = None
+        
+        if os.path.exists('token.json'):
+            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+        
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                if not os.path.exists('credentials.json'):
+                    return []
+                flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+                creds = flow.run_local_server(port=0)
+            with open('token.json', 'w') as token:
+                token.write(creds.to_json())
+        
+        service = build('calendar', 'v3', credentials=creds)
+        
+        # Get today's events
+        local_tz = pytz.timezone('America/New_York')
+        now = datetime.now(local_tz)
+        start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=0)
+        
+        start_utc = start_of_day.astimezone(pytz.UTC).isoformat()
+        end_utc = end_of_day.astimezone(pytz.UTC).isoformat()
+        
+        events_result = service.events().list(
+            calendarId='primary',
+            timeMin=start_utc,
+            timeMax=end_utc,
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+        
+        return events_result.get('items', [])
+    
+    except Exception as e:
+        print(f"Calendar error: {e}")
+        return []
+def get_pricing_tiers():
+    tiers = {}
+    if not os.path.exists(PRICING_FILE):
+        with open(PRICING_FILE, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["TierName", "HourlyRate", "TargetMinutes"])
+        return tiers
+    with open(PRICING_FILE, "r") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            tier = row.get("TierName", "").strip()
+            if tier:
+                tiers[tier] = {
+                    "rate": float(row.get("HourlyRate", DEFAULT_RATE)),
+                    "minutes": int(row.get("TargetMinutes", 60))
+                }
+    return tiers
+
+def get_all_profiles():
+    profiles = {}
+    if not os.path.exists(PROFILES_FILE):
+        with open(PROFILES_FILE, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Name", "TierName", "Rate", "TargetMinutes", "Credits", "Description"])
+        return profiles
+    with open(PROFILES_FILE, "r") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            name = row.get("Name", "").strip()
+            if name:
+                profiles[name] = {
+                    "tier_name": row.get("TierName", "Custom Package").strip(),
+                    "rate": float(row.get("Rate", DEFAULT_RATE)),
+                    "target_minutes": int(row.get("TargetMinutes", 60)),
+                    "credits": int(row.get("Credits", 0)),
+                    "description": row.get("Description", "").strip()
+                }
+    return profiles
+
+def save_all_profiles(profiles_map):
+    with open(PROFILES_FILE, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Name", "TierName", "Rate", "TargetMinutes", "Credits", "Description"])
+        for name, data in profiles_map.items():
+            writer.writerow([name, data['tier_name'], f"{data['rate']:.2f}", data['target_minutes'], data['credits'], data['description']])
+
+def calculate_advanced_stats():
+    total_paid_lessons = 0
+    total_noshows = 0
+    gross_revenue = 0.0
+    if os.path.exists(LEDGER_FILE):
+        with open(LEDGER_FILE, "r") as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                status = row.get('Status', '')
+                try:
+                    charge = float(row.get('AmountCharged', 0))
+                    if status == 'Attended' and charge > 0:
+                        total_paid_lessons += 1
+                    elif status == 'No-Show':
+                        total_noshows += 1
+                    gross_revenue += charge
+                except ValueError:
+                    pass
+    return total_paid_lessons, total_noshows, gross_revenue
+
+def calculate_monthly_statements():
+    statements = {}
+    if os.path.exists(LEDGER_FILE):
+        with open(LEDGER_FILE, "r") as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                student = row.get('Student', 'Unknown')
+                status = row.get('Status', '')
+                try:
+                    charge = float(row.get('AmountCharged', 0))
+                except ValueError:
+                    charge = 0.0
+                if student not in statements:
+                    statements[student] = {"lessons": 0, "noshows": 0, "total": 0.0}
+                if status == "Attended":
+                    statements[student]["lessons"] += 1
+                elif status == "No-Show":
+                    statements[student]["noshows"] += 1
+                elif status == "Ledger Correction":
+                    if "reversed Attended" in row.get('Notes', ''):
+                        statements[student]["lessons"] -= 1
+                    elif "reversed No-Show" in row.get('Notes', ''):
+                        statements[student]["noshows"] -= 1
+                statements[student]["total"] += charge
+    return statements
+
+def get_last_undone_action():
+    if not os.path.exists(LEDGER_FILE):
+        return None
+    with open(LEDGER_FILE, "r") as f:
+        reader = list(csv.DictReader(f))
+        for row in reversed(reader):
+            if row.get("Status") != "Ledger Correction":
+                return row
+    return None
+
+# --- MASTER UI LAYOUT WRAPPER ---
+def get_shared_html_layout(current_page: str, content_body: str) -> str:
+    return f"""
+    <html>
+        <head>
+            <title>Studio Management Suite</title>
+            <style>
+                :root {{
+                    --bg-main: #f5f5f7;
+                    --bg-card: #ffffff;
+                    --text-primary: #1d1d1f;
+                    --text-secondary: #6e6e73;
+                    --accent-blue: #0071e3;
+                    --accent-green: #34c759;
+                    --accent-orange: #ff9500;
+                    --accent-red: #ff3b30;
+                    --border-radius-lg: 16px;
+                    --border-radius-sm: 8px;
+                    --shadow-sm: 0 2px 8px rgba(0,0,0,0.04);
+                    --shadow-md: 0 4px 20px rgba(0,0,0,0.08);
+                    --nav-height: 64px;
+                }}
+                body {{
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                    margin: 0;
+                    padding: calc(var(--nav-height) + 40px) 20px 80px 20px;
+                    background-color: var(--bg-main);
+                    color: var(--text-primary);
+                    -webkit-font-smoothing: antialiased;
+                }}
+                .navbar {{
+                    position: fixed; top: 0; left: 0; right: 0; height: var(--nav-height);
+                    background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+                    border-bottom: 1px solid rgba(0, 0, 0, 0.05); z-index: 1000;
+                    display: flex; justify-content: center; align-items: center;
+                }}
+                .nav-container {{ width: 100%; max-width: 800px; display: flex; justify-content: space-between; align-items: center; padding: 0 20px; }}
+                .nav-brand {{ font-weight: 700; font-size: 1.1em; color: var(--text-primary); }}
+                .nav-links {{ display: flex; gap: 6px; }}
+                .nav-link {{
+                    color: var(--text-secondary); text-decoration: none; font-size: 0.95em; font-weight: 500;
+                    padding: 8px 16px; border-radius: 18px; transition: all 0.2s ease;
+                }}
+                .nav-link:hover {{ color: var(--accent-blue); background: rgba(0, 113, 227, 0.05); }}
+                .nav-link.active {{ color: var(--accent-blue); background: rgba(0, 113, 227, 0.08); font-weight: 600; }}
+                .container {{ max-width: 800px; margin: 0 auto; }}
+                h1 {{ font-size: 2.2em; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 8px; }}
+                h2 {{ font-size: 1.4em; font-weight: 600; margin-top: 40px; margin-bottom: 18px; }}
+                .day-banner {{ background: rgba(0, 113, 227, 0.06); color: var(--accent-blue); padding: 6px 14px; border-radius: 20px; font-size: 0.85em; font-weight: 600; display: inline-block; margin-bottom: 25px; }}
+                .stats-bar {{ display: flex; gap: 16px; margin-bottom: 30px; }}
+                .stat-card {{ flex: 1; background: var(--bg-card); padding: 20px; border-radius: var(--border-radius-lg); box-shadow: var(--shadow-sm); }}
+                .stat-label {{ font-size: 0.8em; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; }}
+                .stat-value {{ font-size: 1.8em; font-weight: 700; margin-top: 6px; }}
+                .lesson-card, .form-panel, .statement-box {{ background: var(--bg-card); padding: 24px; border-radius: var(--border-radius-lg); box-shadow: var(--shadow-sm); margin-bottom: 16px; }}
+                .card-header-row {{ display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }}
+                .student {{ font-size: 1.3em; font-weight: 700; }}
+                .pill {{ font-size: 0.75em; font-weight: 600; padding: 4px 10px; border-radius: 12px; }}
+                .rate-pill {{ background: #f2f2f7; color: var(--text-primary); }}
+                .length-pill {{ background: #e8f0fe; color: #1a73e8; }}
+                .credit-pill {{ background: #e6f4ea; color: #137333; }}
+                .unregistered-warning {{ background: #fff3cd; color: #856404; }}
+                .mismatch-warning {{ background: #fce8e6; color: #c5221f; }}
+                .desc-text {{ font-size: 0.95em; color: var(--text-secondary); margin-bottom: 14px; display: block; }}
+                .time-text {{ font-size: 0.9em; color: var(--text-secondary); display: block; margin-bottom: 18px; }}
+                .action-bar {{ display: flex; gap: 10px; }}
+                button, .btn-shortcut {{ font-family: inherit; border: none; padding: 10px 18px; border-radius: var(--border-radius-sm); font-weight: 600; font-size: 0.9em; cursor: pointer; transition: all 0.15s ease; text-decoration: none; display: inline-block; text-align: center; }}
+                button:active {{ transform: scale(0.98); }}
+                .btn-attend {{ background-color: var(--accent-green); color: white; }}
+                .btn-cancel {{ background-color: var(--accent-orange); color: white; }}
+                .btn-noshow {{ background-color: var(--accent-red); color: white; }}
+                .btn-shortcut {{ background-color: var(--accent-blue); color: white; padding: 6px 12px; font-size: 0.85em; }}
+                .form-group {{ margin-bottom: 20px; }}
+                .form-group label {{ display: block; font-weight: 600; font-size: 0.9em; margin-bottom: 8px; }}
+                .form-control, select {{ width: 100%; padding: 12px; border: 1px solid #d2d2d7; border-radius: var(--border-radius-sm); font-size: 1em; box-sizing: border-box; background-color: #fafafa; }}
+                .btn-submit {{ background-color: var(--accent-blue); color: white; width: 100%; padding: 12px; border-radius: var(--border-radius-sm); font-size: 1em; font-weight: 600; }}
+                .rate-row {{ display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }}
+                .static-field {{ padding: 12px; font-size: 0.95em; background: #f5f5f7; border-radius: var(--border-radius-sm); border: 1px solid #e5e5ea; flex: 1; }}
+                .undo-panel {{ background-color: #fafafa; border: 1px solid #d2d2d7; border-radius: var(--border-radius-lg); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }}
+                .statement-row {{ display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #f2f2f7; }}
+                .statement-row:last-child {{ border: 0; }}
+            </style>
+            <script>
+                function toggleTierRowEdit(index) {{
+                    var viewMode = document.getElementById("view-mode-" + index);
+                    var editMode = document.getElementById("edit-mode-" + index);
+                    if (viewMode.style.display !== "none") {{
+                        viewMode.style.display = "none";
+                        editMode.style.display = "flex";
+                    }} else {{
+                        viewMode.style.display = "flex";
+                        editMode.style.display = "none";
+                    }}
+                }}
+            </script>
+        </head>
+        <body>
+            <nav class="navbar">
+                <div class="nav-container">
+                    <div class="nav-brand">🎵 StudioConsole</div>
+                    <div class="nav-links">
+                        <a href="/" class="nav-link {'active' if current_page == 'today' else ''}">Today</a>
+                        <a href="/students" class="nav-link {'active' if current_page == 'students' else ''}">Students</a>
+                        <a href="/rates" class="nav-link {'active' if current_page == 'rates' else ''}">Rates</a>
+                    </div>
+                </div>
+            </nav>
+            <div class="container">
+                {content_body}
+            </div>
+        </body>
+    </html>
+    """
+
+# --- PAGE 1: TODAY VIEW ENDPOINT ---
+@app.get("/", response_class=HTMLResponse)
+def home_dashboard():
+    current_day = datetime.now().strftime("%A")
+    current_month = datetime.now().strftime("%B %Y")
+    events = get_google_calendar_events()
+    profiles_map = get_all_profiles()
+    paid_count, noshow_count, revenue = calculate_advanced_stats()
+    monthly_billing_records = calculate_monthly_statements()
+    last_action = get_last_undone_action()
+
+    body = f"""
+    <h1>Studio Operations</h1>
+    <div class="day-banner">📅 Running Schedule: {current_day}</div>
+    
+    <div class="stats-bar">
+        <div class="stat-card">
+            <div class="stat-label">🎼 Lessons Logged</div>
+            <div class="stat-value">✅ {paid_count}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">🚨 No-Shows</div>
+            <div class="stat-value" style="color: var(--accent-red);">⏳ {noshow_count}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">💰 Monthly Revenue</div>
+            <div class="stat-value">${revenue:.2f}</div>
+        </div>
+    </div>
+
+    <h2>📊 Running Ledger Statements ({current_month})</h2>
+    <div class="statement-box">
+    """
+    if not monthly_billing_records:
+        body += '<div style="color: var(--text-secondary); text-align:center; padding:10px 0;">No active billing loops calculated in this cycle.</div>'
+    else:
+        for student, data in monthly_billing_records.items():
+            if data['lessons'] == 0 and data['noshows'] == 0 and data['total'] == 0:
+                continue
+            calculated_balance = round(float(data['total']), 2)
+            body += f"""
+            <div class="statement-row">
+                <span>👤 <b>{student}</b> <span style="color: var(--text-secondary); font-size:0.9em; margin-left:10px;">(Attended: {data['lessons']} | No-Shows: {data['noshows']})</span></span>
+                <span style="font-weight: 600;">Due: ${calculated_balance:.2f}</span>
+            </div>
+            """
+    body += "</div><h2>👥 Today's Lesson Roster Feed</h2>"
+
+    if isinstance(events, dict) and "error" in events:
+        body += f'<div class="lesson-card" style="color: var(--accent-red); font-weight:600;">Calendar API Alert: {events["error"]}</div>'
+    elif not events:
+        body += '<div class="lesson-card" style="color: var(--text-secondary); text-align:center; font-style:italic; padding:30px;">All clear! No upcoming calendar slots tracked for today. ☕</div>'
+    else:
+        for event in events:
+            student_name = event.get('summary', 'Unknown Student')
+            start_info = event.get('start', {})
+            end_info = event.get('end', {})
+            start_str = start_info.get('dateTime', start_info.get('date', ''))
+            end_str = end_info.get('dateTime', end_info.get('date', ''))
+            
+            formatted_time = "All Day"
+            length_badge = ""
+            calendar_minutes = 60
+            
+            if 'T' in start_str and 'T' in end_str:
+                time_part = start_str.split('T')[1][:5]
+                try:
+                    hr, mn = map(int, time_part.split(':'))
+                    ampm = "AM" if hr < 12 else "PM"
+                    if hr > 12: hr -= 12
+                    elif hr == 0: hr = 12
+                    formatted_time = f"{hr}:{mn:02d} {ampm}"
+                except Exception:
+                    formatted_time = time_part
+
+                try:
+                    clean_start = start_str.split('-')[0].split('+')[0]
+                    clean_end = end_str.split('-')[0].split('+')[0]
+                    duration = datetime.fromisoformat(clean_end) - datetime.fromisoformat(clean_start)
+                    calendar_minutes = int(duration.total_seconds() / 60)
+                    length_badge = f'<span class="pill length-pill">⏱️ {calendar_minutes} mins</span>'
+                except Exception:
+                    length_badge = '<span class="pill length-pill">⏱️ 60 mins</span>'
+
+            is_registered = student_name in profiles_map
+            mismatch_alert = ""
+            
+            if is_registered:
+                profile = profiles_map[student_name]
+                credit_badge = f'<span class="pill credit-pill">🎒 Rollover: {profile["credits"]}</span>' if profile["credits"] > 0 else ""
+                rate_badge = f'<span class="pill rate-pill">💵 Rate: ${profile["rate"]:.2f}/hr</span>'
+                desc_line = f'<span class="desc-text">📋 <b>Focus:</b> {profile["description"]} <span style="color: var(--text-secondary);">({profile["tier_name"]})</span></span>'
+                if calendar_minutes != profile["target_minutes"]:
+                    mismatch_alert = f'<span class="pill mismatch-warning">⚠️ Mismatch (Expected {profile["target_minutes"]}m)</span>'
+            else:
+                credit_badge = '<span class="pill unregistered-warning">⚠️ Profile Offline</span>'
+                rate_badge = f'<a href="/students?prefill_name={student_name}" class="btn-shortcut">➕ Create Profile</a>'
+                desc_line = '<span class="desc-text" style="color: var(--accent-orange); font-weight: 500;">Click "Create Profile" to sync this identity with your studio database.</span>'
+
+            body += f"""
+            <div class="lesson-card">
+                <div class="card-header-row">
+                    <span class="student">👤 {student_name}</span> {rate_badge} {length_badge} {mismatch_alert} {credit_badge}
+                </div>
+                {desc_line}
+                <span class="time-text">🕒 <b>Session Clock:</b> {formatted_time}</span>
+                <div class="action-bar">
+                    <form action="/log-attendance" method="post" style="margin:0;">
+                        <input type="hidden" name="student" value="{student_name}"><input type="hidden" name="status" value="Attended"><input type="hidden" name="duration_mins" value="{calendar_minutes}">
+                        <button type="submit" class="btn-attend">✅ Check-In</button>
+                    </form>
+                    <form action="/log-attendance" method="post" style="margin:0;">
+                        <input type="hidden" name="student" value="{student_name}"><input type="hidden" name="status" value="Teacher Cancelled">
+                        <button type="submit" class="btn-cancel">🔄 Cancel</button>
+                    </form>
+                    <form action="/log-attendance" method="post" style="margin:0;">
+                        <input type="hidden" name="student" value="{student_name}"><input type="hidden" name="status" value="No-Show"><input type="hidden" name="duration_mins" value="{calendar_minutes}">
+                        <button type="submit" class="btn-noshow">❌ No-Show</button>
+                    </form>
+                </div>
+            </div>
+            """
+
+    if last_action:
+        body += f"""
+        <div class="undo-panel">
+            <div style="font-size: 0.95em;">⏮️ <b>Recent Action:</b> <u>{last_action.get('Student','')}</u> set to <i>{last_action.get('Status','')}</i> (${last_action.get('AmountCharged','')})</div>
+            <form action="/undo-last-action" method="post" style="margin:0;">
+                <input type="hidden" name="target_student" value="{last_action.get('Student','')}"><input type="hidden" name="target_status" value="{last_action.get('Status','')}"><input type="hidden" name="target_charge" value="{last_action.get('AmountCharged','0')}">
+                <button type="submit" style="background-color: var(--text-secondary); color:white; padding:6px 12px; font-size:0.85em;">↩️ Undo</button>
+            </form>
+        </div>
+        """
+    return get_shared_html_layout("today", body)
+
+# --- PAGE 2: STUDENTS ROSTER ENDPOINT ---
+@app.get("/students", response_class=HTMLResponse)
+def students_page(prefill_name: str = ""):
+    profiles_map = get_all_profiles()
+    pricing_tiers = get_pricing_tiers()
+    
+    body = """
+    <h1>Active Student Roster</h1>
+    <p style="color: var(--text-secondary); margin-bottom:25px;">Manage local student parameters and onboarding registration records.</p>
+    """
+    
+    if not profiles_map:
+        body += '<div class="lesson-card" style="text-align:center; color: var(--text-secondary); font-style:italic;">No student profiles registered in local database yet.</div>'
+    else:
+        for name, data in profiles_map.items():
+            body += f"""
+            <div class="lesson-card">
+                <div class="card-header-row">
+                    <span class="student">👤 {name}</span>
+                    <span class="pill rate-pill">💵 Package Rate: ${data['rate']:.2f}/hr</span>
+                    <span class="pill length-pill">⏱️ Targets: {data['target_minutes']}m</span>
+                    {f"<span class='pill credit-pill'>🎒 Rollover: {data['credits']}</span>" if data['credits'] > 0 else ""}
+                </div>
+                <span class="desc-text">📋 <b>Focus Notes:</b> {data['description']} <span style="color: var(--text-secondary);">({data['tier_name']})</span></span>
+            </div>
+            """
+            
+    body += f"""
+    <h2>➕ Register New Student Profile</h2>
+    <div class="form-panel">
+        <form action="/add-profile" method="post">
+            <div class="form-group">
+                <label>Student Name</label>
+                <input type="text" name="name" class="form-control" placeholder="Match Calendar Subject String Exactly" value="{prefill_name}" required>
+            </div>
+            <div class="form-group">
+                <label>Assigned Pricing Profile Tier Package</label>
+                <select name="rate_tier_name" class="form-control">
+    """
+    for tier, tier_data in pricing_tiers.items():
+        body += f'<option value="{tier}">{tier} ({tier_data["minutes"]} mins @ ${tier_data["rate"]:.2f}/hr)</option>'
+    body += """
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Curriculum Focus / Pedagogical Notes</label>
+                <input type="text" name="description" class="form-control" placeholder="e.g. Snare focus, rolling mallet prep" required>
+            </div>
+            <button type="submit" class="btn-submit">Complete Profile Integration</button>
+        </form>
+    </div>
+    """
+    return get_shared_html_layout("students", body)
+
+# --- PAGE 3: RATES & PRICING CONFIG ENDPOINT ---
+@app.get("/rates", response_class=HTMLResponse)
+def rates_page():
+    pricing_tiers = get_pricing_tiers()
+    body = """
+    <h1>Studio Pricing Configuration</h1>
+    <p style="color: var(--text-secondary); margin-bottom:25px;">Define custom lesson lengths and foundational base hourly billing rates.</p>
+    <div class="form-panel" style="padding: 10px 24px;">
+    """
+    idx = 0
+    for tier_name, tier_info in pricing_tiers.items():
+        body += f"""
+        <div id="row-container-{idx}" class="rate-row" style="padding: 12px 0; border-bottom: 1px solid #f2f2f7;">
+            <div id="view-mode-{idx}" style="display:flex; flex:1; gap:10px; align-items:center;">
+                <div class="static-field" style="flex:2; font-weight:500;">🏷️ {tier_name}</div>
+                <div class="static-field" style="max-width:80px; text-align:center; color: var(--accent-blue); font-weight:600;">⏱️ {tier_info['minutes']} m</div>
+                <div class="static-field" style="max-width:100px; text-align:center; font-weight:600;">${tier_info['rate']:.2f}/hr</div>
+                <button type="button" class="btn-shortcut" onclick="toggleTierRowEdit({idx})">✏️ Edit</button>
+            </div>
+            <form action="/update-pricing-tier" method="post" id="edit-mode-{idx}" style="display:none; flex:1; gap:10px; align-items:center; margin:0;">
+                <input type="hidden" name="old_tier_name" value="{tier_name}">
+                <input type="text" name="new_tier_name" value="{tier_name}" class="form-control" style="flex:2;" required>
+                <input type="number" name="target_minutes" value="{tier_info['minutes']}" class="form-control" style="width:75px;" required>
+                <input type="number" step="0.01" name="hourly_rate" value="{tier_info['rate']:.2f}" class="form-control" style="width:85px;" required>
+                <button type="submit" class="btn-shortcut" style="background-color: var(--accent-green);">✅ Save</button>
+            </form>
+            <form action="/delete-pricing-tier" method="post" style="margin:0;">
+                <input type="hidden" name="tier_name" value="{tier_name}">
+                <button type="submit" class="btn-shortcut" style="margin:0; background-color: var(--accent-red);">🗑️ Delete</button>
+            </form>
+        </div>
+        """
+        idx += 1
+    body += """
+    </div>
+    <h2>⚙️ Add New Pricing Configuration</h2>
+    <div class="form-panel">
+        <form action="/save-pricing-tier" method="post" class="rate-row" style="margin:0; gap:15px; flex-direction:column; align-items:stretch;">
+            <div class="form-group" style="margin:0;">
+                <label>Package / Tier Name</label>
+                <input type="text" name="tier_name" placeholder="e.g. Advanced Snare Masterclass" class="form-control" required>
+            </div>
+            <div style="display:flex; gap:15px;">
+                <div class="form-group" style="flex:1; margin:0;">
+                    <label>Target Lesson Length (Minutes)</label>
+                    <input type="number" name="target_minutes" placeholder="e.g. 45" class="form-control" required>
+                </div>
+                <div class="form-group" style="flex:1; margin:0;">
+                    <label>Base Hourly Value ($/hr)</label>
+                    <input type="number" step="0.01" name="hourly_rate" placeholder="e.g. 60.00" class="form-control" required>
+                </div>
+            </div>
+            <button type="submit" class="btn-submit" style="background-color: var(--accent-green);">+ Deploy Package Tier</button>
+        </form>
+    </div>
+    """
+    return get_shared_html_layout("rates", body)
+
+# --- POST ROUTING MUTATIONS ---
+@app.post("/log-attendance")
+def log_attendance(student: str = Form(...), status: str = Form(...), duration_mins: int = Form(60)):
+    profiles_map = get_all_profiles()
+    profile = profiles_map.get(student, {"rate": DEFAULT_RATE, "credits": 0, "description": "", "target_minutes": 60})
+    lesson_hours = duration_mins / 60.0
+    amount_to_charge = profile["rate"] * lesson_hours
+    notes = f"Pro-rated for exactly {duration_mins} mins."
+    if status == "Attended":
+        if profile["credits"] > 0:
+            profiles_map[student]["credits"] -= 1
+            amount_to_charge = 0.00
+            notes = f"Attended ({duration_mins} mins). Used 1 active rollover studio credit. Charged $0.00."
+    elif status == "Teacher Cancelled":
+        if student not in profiles_map:
+            profiles_map[student] = {"tier_name": "Unknown Package", "rate": DEFAULT_RATE, "target_minutes": 60, "credits": 0, "description": ""}
+        profiles_map[student]["credits"] += 1
+        amount_to_charge = 0.00
+        notes = "Lesson cancelled by Instructor. Added +1 rollover balance credit to profile."
+    elif status == "No-Show":
+        notes = f"Unexcused student absence. Charged pro-rated booking rate (${profile['rate']:.2f}/hr × {lesson_hours:.2f} hrs)."
+    save_all_profiles(profiles_map)
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    with open(LEDGER_FILE, "a", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow([today_str, student, status, f"{amount_to_charge:.2f}", notes])
+    return RedirectResponse(url="/", status_code=303)
+
+@app.post("/undo-last-action")
+def undo_last_action(target_student: str = Form(...), target_status: str = Form(...), target_charge: float = Form(...)):
+    profiles_map = get_all_profiles()
+    if target_student in profiles_map:
+        if target_status == "Teacher Cancelled" and profiles_map[target_student]["credits"] > 0:
+            profiles_map[target_student]["credits"] -= 1
+        elif target_status == "Attended" and target_charge == 0.0:
+            profiles_map[target_student]["credits"] += 1
+    save_all_profiles(profiles_map)
+    inverse_charge = -1 * target_charge
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    with open(LEDGER_FILE, "a", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow([today_str, target_student, "Ledger Correction", f"{inverse_charge:.2f}", f"REVERSAL CORE: Safely reversed {target_status} entry mistake."])
+    return RedirectResponse(url="/", status_code=303)
+
+@app.post("/save-pricing-tier")
+def save_pricing_tier(tier_name: str = Form(...), hourly_rate: float = Form(...), target_minutes: int = Form(60)):
+    tiers_map = get_pricing_tiers()
+    tiers_map[tier_name] = {"rate": hourly_rate, "minutes": target_minutes}
+    with open(PRICING_FILE, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["TierName", "HourlyRate", "TargetMinutes"])
+        for name, data in tiers_map.items():
+            writer.writerow([name, f"{data['rate']:.2f}", data['minutes']])
+    return RedirectResponse(url="/rates", status_code=303)
+
+@app.post("/update-pricing-tier")
+def update_pricing_tier(old_tier_name: str = Form(...), new_tier_name: str = Form(...), hourly_rate: float = Form(...), target_minutes: int = Form(60)):
+    tiers_map = get_pricing_tiers()
+    if old_tier_name in tiers_map:
+        del tiers_map[old_tier_name]
+    tiers_map[new_tier_name] = {"rate": hourly_rate, "minutes": target_minutes}
+    with open(PRICING_FILE, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["TierName", "HourlyRate", "TargetMinutes"])
+        for name, data in tiers_map.items():
+            writer.writerow([name, f"{data['rate']:.2f}", data['minutes']])
+    return RedirectResponse(url="/rates", status_code=303)
+
+@app.post("/delete-pricing-tier")
+def delete_pricing_tier(tier_name: str = Form(...)):
+    tiers_map = get_pricing_tiers()
+    if tier_name in tiers_map:
+        del tiers_map[tier_name]
+    with open(PRICING_FILE, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["TierName", "HourlyRate", "TargetMinutes"])
+        for name, data in tiers_map.items():
+            writer.writerow([name, f"{data['rate']:.2f}", data['minutes']])
+    return RedirectResponse(url="/rates", status_code=303)
+
+@app.post("/add-profile")
+def add_profile(name: str = Form(...), rate_tier_name: str = Form(...), description: str = Form(...)):
+    tiers_map = get_pricing_tiers()
+    selected_tier = tiers_map.get(rate_tier_name, {"rate": DEFAULT_RATE, "minutes": 60})
+    profiles_map = get_all_profiles()
+    profiles_map[name] = {
+        "tier_name": rate_tier_name,
+        "rate": selected_tier["rate"],
+        "target_minutes": selected_tier["minutes"],
+        "credits": profiles_map.get(name, {}).get("credits", 0),
+        "description": description
+    }
+    save_all_profiles(profiles_map)
+    return RedirectResponse(url="/students", status_code=303)
+
+# ===== LOGIN SYSTEM =====
+@app.get("/login", response_class=HTMLResponse)
+def login_page(error: str = ""):
+    """Display login page"""
+    error_html = f'<div class="error" style="background:#fee;color:#c33;padding:10px;border-radius:8px;margin-bottom:20px;">{error}</div>' if error else ''
+    
+    login_html = f'''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Studio Login</title>
+        <style>
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                height: 100vh;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                margin: 0;
+            }}
+            .login-container {{
+                background: white;
+                padding: 40px;
+                border-radius: 20px;
+                box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+                width: 100%;
+                max-width: 400px;
+            }}
+            h1 {{ text-align: center; color: #333; margin-bottom: 10px; }}
+            .subtitle {{ text-align: center; color: #666; margin-bottom: 30px; }}
+            .form-group {{ margin-bottom: 20px; }}
+            label {{ display: block; margin-bottom: 8px; font-weight: 600; }}
+            input {{
+                width: 100%;
+                padding: 12px;
+                border: 2px solid #e0e0e0;
+                border-radius: 8px;
+                font-size: 16px;
+            }}
+            input:focus {{ outline: none; border-color: #667eea; }}
+            button {{
+                width: 100%;
+                padding: 12px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 16px;
+                font-weight: 600;
+                cursor: pointer;
+            }}
+            button:hover {{ transform: translateY(-2px); }}
+        </style>
+    </head>
+    <body>
+        <div class="login-container">
+            <h1>🎵 Studio Console</h1>
+            <div class="subtitle">Please log in to continue</div>
+            {error_html}
+            <form action="/login" method="post">
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" name="username" required autofocus>
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" name="password" required>
+                </div>
+                <button type="submit">Login</button>
+            </form>
+        </div>
+    </body>
+    </html>
+    '''
+    return HTMLResponse(content=login_html)
+
+@app.post("/login")
+def login_post(username: str = Form(...), password: str = Form(...)):
+    """Handle login"""
+    import json
+    import hashlib
+    import os
+    
+    PASSWORD_FILE = "admin_password.json"
+    
+    # Only admin user for now
+    if username != "admin":
+        return RedirectResponse(url="/login?error=Invalid username or password", status_code=303)
+    
+    # Check password from file
+    if os.path.exists(PASSWORD_FILE):
+        with open(PASSWORD_FILE, 'r') as f:
+            data = json.load(f)
+            stored_hash = data.get("password_hash", "")
+            input_hash = hashlib.sha256(password.encode()).hexdigest()
+            if input_hash == stored_hash:
+                response = RedirectResponse(url="/", status_code=303)
+                response.set_cookie(key="studio_session", value="authenticated", httponly=True, max_age=86400)
+                return response
+    
+    return RedirectResponse(url="/login?error=Invalid username or password", status_code=303)@app.get("/logout")
+def logout():
+    """Handle logout"""
+    response = RedirectResponse(url="/login", status_code=303)
+    response.delete_cookie("studio_session")
+    return response
+
+# Simple auth middleware
+@app.middleware("http")
+async def check_auth(request: Request, call_next):
+    # Skip auth for login/logout
+    if request.url.path in ["/login", "/logout", "/docs", "/openapi.json"]:
+        return await call_next(request)
+    
+    # Check for session cookie
+    session = request.cookies.get("studio_session")
+    if session == "authenticated":
+        return await call_next(request)
+    
+    # Redirect to login
+    return RedirectResponse(url="/login", status_code=303)
+
+
+@app.get("/change-password", response_class=HTMLResponse)
+def change_password_form():
+    """Display change password form"""
+    return HTMLResponse("""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Change Password</title>
+        <style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                height: 100vh;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                margin: 0;
+            }
+            .container {
+                background: white;
+                padding: 40px;
+                border-radius: 20px;
+                box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+                width: 100%;
+                max-width: 400px;
+            }
+            h1 { text-align: center; color: #333; margin-bottom: 10px; }
+            .form-group { margin-bottom: 20px; }
+            label { display: block; margin-bottom: 8px; font-weight: 600; }
+            input {
+                width: 100%;
+                padding: 12px;
+                border: 2px solid #e0e0e0;
+                border-radius: 8px;
+                font-size: 16px;
+            }
+            button {
+                width: 100%;
+                padding: 12px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 16px;
+                font-weight: 600;
+                cursor: pointer;
+            }
+            .back-link {
+                text-align: center;
+                margin-top: 20px;
+            }
+            .back-link a {
+                color: #667eea;
+                text-decoration: none;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🔐 Change Password</h1>
+            <form action="/change-password" method="post">
+                <div class="form-group">
+                    <label>Current Password</label>
+                    <input type="password" name="old_password" required>
+                </div>
+                <div class="form-group">
+                    <label>New Password</label>
+                    <input type="password" name="new_password" required>
+                </div>
+                <div class="form-group">
+                    <label>Confirm New Password</label>
+                    <input type="password" name="confirm_password" required>
+                </div>
+                <button type="submit">Update Password</button>
+            </form>
+            <div class="back-link">
+                <a href="/">← Back to Dashboard</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    """)
+
+@app.post("/change-password")
+def change_password_post(
+    old_password: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...)
+):
+    """Handle password change"""
+    import json
+    import hashlib
+    import os
+    
+    PASSWORD_FILE = "admin_password.json"
+    
+    if new_password != confirm_password:
+        return RedirectResponse(url="/change-password?error=Passwords don't match", status_code=303)
+    
+    # Verify old password
+    if os.path.exists(PASSWORD_FILE):
+        with open(PASSWORD_FILE, 'r') as f:
+            data = json.load(f)
+            stored_hash = data.get("password_hash", "")
+            old_hash = hashlib.sha256(old_password.encode()).hexdigest()
+            
+            if old_hash != stored_hash:
+                return RedirectResponse(url="/change-password?error=Current password is incorrect", status_code=303)
+    
+    # Save new password
+    new_hash = hashlib.sha256(new_password.encode()).hexdigest()
+    with open(PASSWORD_FILE, 'w') as f:
+        json.dump({"password_hash": new_hash}, f)
+    
+    return HTMLResponse("""
+    <div style="max-width:500px;margin:50px auto;padding:30px;background:white;border-radius:16px;text-align:center">
+        <h2>✅ Password Changed!</h2>
+        <p>Your password has been updated successfully.</p>
+        <p><a href="/logout">Click here to log in with your new password</a></p>
+    </div>
+    """)

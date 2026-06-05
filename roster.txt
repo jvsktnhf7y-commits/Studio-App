@@ -1,0 +1,6 @@
+Monday,Inbaa,4:00 PM,Drum Set / Jazz Idioms
+Monday,Sarah,5:00 PM,Mallet Percussion / Snare
+Thursday,Alex,6:00 PM,Introduction to Timpani
+Thursday,Jessica,7:15 PM,Advanced Brass Articulation
+
+Monday,Bill,5:30 PM,Vibraphone Soloing

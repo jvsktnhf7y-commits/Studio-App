@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Students | Studio Console</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f0f9ff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        /* Header with different style */
+        .header {
+            background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+            border-radius: 24px;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 30px;
+            color: white;
+        }
+        
+        h1 { font-size: 48px; margin-bottom: 10px; }
+        .subtitle { font-size: 18px; opacity: 0.95; }
+        
+        /* Table view instead of cards */
+        .students-table {
+            background: white;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        th {
+            background: #059669;
+            color: white;
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+        
+        td {
+            padding: 15px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        
+        tr:hover {
+            background: #f0fdf4;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .badge-rate { background: #d1fae5; color: #065f46; }
+        .badge-credits { background: #fef3c7; color: #92400e; }
+        
+        .form-card {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            margin-top: 30px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 8px; font-weight: 600; color: #333; }
+        .form-control, select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            font-size: 16px;
+        }
+        
+        .btn-submit {
+            background: #059669;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+        }
+        
+        .btn-submit:hover { background: #047857; }
+        .btn-back {
+            display: inline-block;
+            background: #6b7280;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 12px;
+            text-decoration: none;
+            margin-top: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            th, td { padding: 10px; font-size: 14px; }
+            h1 { font-size: 32px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>👥 Student Directory</h1>
+            <p class="subtitle">Track attendance, credits, and progress</p>
+        </div>
+        
+        <div class="students-table">
+            <table>
+                <thead>
+                    <tr><th>Name</th><th>Rate</th><th>Credits</th><th>Focus</th><th>Duration</th></tr>
+                </thead>
+                <tbody>
+                    {table_rows}
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="form-card">
+            <h2 style="margin-bottom: 20px;">➕ Add New Student</h2>
+            <form action="/add-profile" method="post">
+                <div class="form-group">
+                    <label>Student Name</label>
+                    <input type="text" name="name" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Pricing Tier</label>
+                    <select name="rate_tier_name" class="form-control">
+                        {tier_options}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Focus / Instrument</label>
+                    <input type="text" name="description" class="form-control" placeholder="e.g., Piano, Voice, Guitar" required>
+                </div>
+                <button type="submit" class="btn-submit">✨ Create Profile</button>
+            </form>
+        </div>
+        
+        <div style="text-align: center;">
+            <a href="/dashboard" class="btn-back">← Back to Dashboard</a>
+        </div>
+    </div>
+</body>
+</html>
