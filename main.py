@@ -499,3 +499,42 @@ def callback(code: str = None, state: str = None):
         </body>
         </html>
         """)
+
+
+@app.get("/test-calendar")
+def test_calendar():
+    """Simple test to verify Google Calendar connection"""
+    import json
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+    
+    try:
+        # Check if token exists
+        if not os.path.exists('token.json'):
+            return HTMLResponse("<h2>❌ No token.json found. Please authenticate at /auth/google first.</h2>")
+        
+        # Load credentials
+        with open('token.json', 'r') as f:
+            token_data = json.load(f)
+        
+        creds = Credentials.from_authorized_user_file('token.json', ['https://www.googleapis.com/auth/calendar'])
+        
+        # Build service
+        service = build('calendar', 'v3', credentials=creds)
+        
+        # Get list of calendars (simple test)
+        calendar_list = service.calendarList().list().execute()
+        
+        return HTMLResponse(f"""
+        <html>
+        <head><title>Calendar Test</title></head>
+        <body style="font-family: sans-serif; padding: 20px;">
+            <h2>✅ Google Calendar Connection Working!</h2>
+            <p>Found {len(calendar_list.get('items', []))} calendars.</p>
+            <p>Token expires: {creds.expiry}</p>
+            <p><a href="/dashboard">Back to Dashboard</a></p>
+        </body>
+        </html>
+        """)
+    except Exception as e:
+        return HTMLResponse(f"<h2>❌ Error: {str(e)}</h2><p><a href='/auth/google'>Re-authenticate</a></p>")
