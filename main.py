@@ -6,13 +6,16 @@ import csv
 from datetime import datetime
 import hashlib
 import json
+import pytz
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
 
 app = FastAPI(title="Studio App")
 
 # Create static directory
 os.makedirs("static", exist_ok=True)
 
-# Simple CSS
+# CSS
 css_content = """
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; margin: 0; }
 .container { max-width: 1200px; margin: 0 auto; }
@@ -39,7 +42,6 @@ if not os.path.exists(PASSWORD_FILE):
 # Data files
 PROFILES_FILE = "student_profiles.csv"
 PRICING_FILE = "pricing_tiers.csv"
-LEDGER_FILE = "studio_ledger.csv"
 DEFAULT_RATE = 50.00
 
 def get_all_profiles():
@@ -87,9 +89,41 @@ def save_pricing_tiers(tiers_map):
         for name, data in tiers_map.items():
             writer.writerow([name, data['rate'], data['minutes']])
 
-# Dashboard
+# Dashboard with Calendar
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard():
+    calendar_html = ""
+    if os.path.exists('calendar_token.json'):
+        try:
+            with open('calendar_token.json', 'r') as f:
+                token_data = json.load(f)
+            creds = Credentials.from_authorized_user_info(token_data)
+            service = build('calendar', 'v3', credentials=creds)
+            tz = pytz.timezone('America/New_York')
+            now = datetime.now(tz)
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            end = now.replace(hour=23, minute=59, second=59, microsecond=0)
+            start_utc = start.astimezone(pytz.UTC).isoformat()
+            end_utc = end.astimezone(pytz.UTC).isoformat()
+            events = service.events().list(calendarId='primary', timeMin=start_utc, timeMax=end_utc, singleEvents=True).execute().get('items', [])
+            if events:
+                calendar_html = '<div class="card"><h2>📅 Today\'s Lessons</h2><ul style="list-style:none; padding:0;">'
+                for e in events:
+                    summary = e.get('summary', 'Lesson')
+                    start_time = e.get('start', {}).get('dateTime', 'All day')
+                    if start_time and 'T' in start_time:
+                        dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                        local_dt = dt.astimezone(tz)
+                        start_time = local_dt.strftime('%I:%M %p')
+                    calendar_html += f'<li style="padding:8px 0; border-bottom:1px solid #eee;">🎵 <strong>{summary}</strong> at {start_time}</li>'
+                calendar_html += '</ul></div>'
+            else:
+                calendar_html = '<div class="card"><h2>📅 Today\'s Lessons</h2><p>No lessons scheduled today.</p><a href="/schedule" class="btn">Schedule</a></div>'
+        except Exception as e:
+            calendar_html = f'<div class="card"><h2>📅 Calendar</h2><p><a href="/calendar-auth">Connect Calendar</a></p><p style="color:#999;font-size:12px;">Error: {str(e)[:50]}</p></div>'
+    else:
+        calendar_html = '<div class="card"><h2>📅 Google Calendar</h2><p><a href="/calendar-auth">Connect Calendar</a> to see your lessons.</p></div>'
+    
     return HTMLResponse(f"""
     <!DOCTYPE html>
     <html>
@@ -100,6 +134,7 @@ def dashboard():
                 <h1>🎵 Studio Console</h1>
                 <p>Welcome to your music studio management system</p>
             </div>
+            {calendar_html}
             <div class="grid">
                 <a href="/students" class="card" style="text-align: center; text-decoration: none; color: #333;">
                     <div style="font-size: 48px;">👥</div>
@@ -190,7 +225,7 @@ def students_page():
     <html>
     <head><title>Students</title><link rel="stylesheet" href="/static/style.css"></head>
     <body>
-        <div class="container"><div class="card"><h1>👥 Students</h1><div style="overflow-x:auto;">{'<table><thead><tr><th>Name</th><th>Rate</th><th>Credits</th><th>Focus</th></tr></thead><tbody>' + rows if rows else '<p>No students yet</p>' + '</tbody></table>'}</div></div>
+        <div class="container"><div class="card"><h1>👥 Students</h1>{'<table><thead><tr><th>Name</th><th>Rate</th><th>Credits</th><th>Focus</th></tr></thead><tbody>' + rows if rows else '<p>No students yet</p>' + '</tbody></table>'}</div>
         <div class="card"><h2>➕ Add Student</h2><form action="/add-profile" method="post"><input type="text" name="name" placeholder="Student Name" required><input type="text" name="rate_tier_name" placeholder="Pricing Tier" value="Standard"><input type="text" name="description" placeholder="Focus/Instrument"><button type="submit" class="btn">Create Profile</button></form></div>
         <a href="/dashboard" class="btn">← Back</a></div>
     </body>
@@ -250,13 +285,13 @@ def schedule_page():
 def create_lesson(student_name: str = Form(...), date: str = Form(...), time: str = Form(...), duration: int = Form(60)):
     return HTMLResponse(f"""<!DOCTYPE html><html><head><title>Lesson Created</title><link rel="stylesheet" href="/static/style.css"></head><body><div class="container"><div class="card" style="text-align:center;"><h1>✅ Lesson Created!</h1><p><strong>{student_name}</strong> on {date} at {time} for {duration} minutes</p><a href="/schedule" class="btn">Schedule Another</a><a href="/dashboard" class="btn">Dashboard</a></div></div></body></html>""")
 
-# Google Calendar endpoint
+# Google Calendar endpoints
 @app.get("/calendar-auth")
 def calendar_auth():
     from google_auth_oauthlib.flow import Flow
     from fastapi.responses import RedirectResponse, HTMLResponse
-    import os
     import json
+    import os
     
     creds_json = os.environ.get('GOOGLE_CREDENTIALS', '')
     if not creds_json:
@@ -275,14 +310,14 @@ def calendar_auth():
         auth_url, _ = flow.authorization_url(access_type='offline', prompt='consent')
         return RedirectResponse(auth_url)
     except Exception as e:
-        return HTMLResponse(f"<h2>Error: {str(e)}</h2>")
+        return HTMLResponse(f"<h2>Error: {str(e)}</h2><a href='/dashboard'>Back</a>")
 
 @app.get("/calendar-callback")
 def calendar_callback(code: str = None):
     from google_auth_oauthlib.flow import Flow
     from fastapi.responses import HTMLResponse
-    import os
     import json
+    import os
     
     creds_json = os.environ.get('GOOGLE_CREDENTIALS', '')
     client_config = json.loads(creds_json)
@@ -296,24 +331,16 @@ def calendar_callback(code: str = None):
     )
     flow.fetch_token(code=code)
     
-    # Save token
     token_data = flow.credentials.to_json()
     with open('calendar_token.json', 'w') as f:
         f.write(token_data)
     
     return HTMLResponse("<h2>✅ Calendar Connected!</h2><a href='/dashboard'>Back</a>")
 
-
 @app.get("/calendar-events")
 def calendar_events():
-    from google.oauth2.credentials import Credentials
-    from googleapiclient.discovery import build
-    import json
-    from datetime import datetime
-    import pytz
-    
     if not os.path.exists('calendar_token.json'):
-        return HTMLResponse("<h2>Calendar not connected. Go to /calendar-auth first.</h2>")
+        return HTMLResponse("<h2>Calendar not connected. <a href='/calendar-auth'>Connect here</a></h2>")
     
     with open('calendar_token.json', 'r') as f:
         token_data = json.load(f)
@@ -321,71 +348,27 @@ def calendar_events():
     creds = Credentials.from_authorized_user_info(token_data)
     service = build('calendar', 'v3', credentials=creds)
     
-    # Get user's timezone from calendar settings
-    settings = service.settings().get(setting='timezone').execute()
-    user_tz_str = settings.get('value', 'America/New_York')
-    user_tz = pytz.timezone(user_tz_str)
-    
-    now = datetime.now(user_tz)
+    tz = pytz.timezone('America/New_York')
+    now = datetime.now(tz)
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     end = now.replace(hour=23, minute=59, second=59, microsecond=0)
     
     start_utc = start.astimezone(pytz.UTC).isoformat()
     end_utc = end.astimezone(pytz.UTC).isoformat()
     
-    events_result = service.events().list(
-        calendarId='primary',
-        timeMin=start_utc,
-        timeMax=end_utc,
-        singleEvents=True,
-        orderBy='startTime'
-    ).execute()
-    
-    events = events_result.get('items', [])
-    
-    # Build debug info
-    debug_info = f"""
-    <p><strong>Your timezone:</strong> {user_tz_str}</p>
-    <p><strong>Searching from:</strong> {start_utc}</p>
-    <p><strong>Searching to:</strong> {end_utc}</p>
-    <p><strong>Current time (your timezone):</strong> {now.strftime('%Y-%m-%d %H:%M:%S')}</p>
-    <p><strong>Events found:</strong> {len(events)}</p>
-    """
+    events = service.events().list(calendarId='primary', timeMin=start_utc, timeMax=end_utc, singleEvents=True).execute().get('items', [])
     
     if not events:
-        return HTMLResponse(f"""
-        <html>
-        <body style="padding:20px; font-family:sans-serif;">
-            <h2>No events found for today</h2>
-            {debug_info}
-            <p>Make sure you have events in your primary Google Calendar for today.</p>
-            <a href="/dashboard">Back to Dashboard</a>
-        </body>
-        </html>
-        """)
+        return HTMLResponse("<h2>No events today</h2><a href='/dashboard'>Back</a>")
     
-    event_list = "<ul>"
+    html = "<h2>Today's Events</h2><ul>"
     for e in events:
         summary = e.get('summary', 'Untitled')
         start_time = e.get('start', {}).get('dateTime', 'All day')
-        if start_time and 'T' in start_time:
-            # Convert to local time for display
-            dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-            local_dt = dt.astimezone(user_tz)
-            start_time = local_dt.strftime('%I:%M %p')
-        event_list += f"<li><strong>{summary}</strong> at {start_time}</li>"
-    event_list += "</ul>"
-    
-    return HTMLResponse(f"""
-    <html>
-    <body style="padding:20px; font-family:sans-serif;">
-        <h2>📅 Today's Calendar Events</h2>
-        {debug_info}
-        {event_list}
-        <p><a href="/dashboard">Back to Dashboard</a></p>
-    </body>
-    </html>
-    """)
+        html += f"<li>{summary} at {start_time}</li>"
+    html += "</ul><a href='/dashboard'>Back</a>"
+    return HTMLResponse(html)
+
 @app.get("/test")
 def test():
     return {"status": "ok"}
