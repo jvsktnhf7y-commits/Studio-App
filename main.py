@@ -322,6 +322,102 @@ def create_lesson(student_name: str = Form(...), date: str = Form(...), time: st
     """)
 
 # Test endpoint
+
+
+# Google Calendar Integration
+from google.auth.transport.requests import Request as GoogleRequest
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+import pytz
+
+CALENDAR_SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
+CALENDAR_TOKEN_FILE = 'calendar_token.json'
+
+def get_calendar_service():
+    creds = None
+    if os.path.exists(CALENDAR_TOKEN_FILE):
+        creds = Credentials.from_authorized_user_file(CALENDAR_TOKEN_FILE, CALENDAR_SCOPES)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(GoogleRequest())
+        else:
+            if not os.path.exists('credentials.json'):
+                return None
+            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', CALENDAR_SCOPES)
+            creds = flow.run_local_server(port=0)
+        with open(CALENDAR_TOKEN_FILE, 'w') as token:
+            token.write(creds.to_json())
+    return build('calendar', 'v3', credentials=creds)
+
+def get_todays_events():
+    try:
+        service = get_calendar_service()
+        if not service:
+            return []
+        local_tz = pytz.timezone('America/New_York')
+        now = datetime.now(local_tz)
+        start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=0)
+        start_utc = start_of_day.astimezone(pytz.UTC).isoformat()
+        end_utc = end_of_day.astimezone(pytz.UTC).isoformat()
+        events_result = service.events().list(
+            calendarId='primary',
+            timeMin=start_utc,
+            timeMax=end_utc,
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+        return events_result.get('items', [])
+    except Exception as e:
+        print(f"Calendar error: {e}")
+        return []
+
+@app.get("/calendar-setup")
+def calendar_setup():
+    if not os.path.exists('credentials.json'):
+        return HTMLResponse("<h2>No credentials.json</h2><a href='/dashboard'>Back</a>")
+    return HTMLResponse('<h2>Go to /calendar-auth to authorize</h2><a href="/calendar-auth">Authorize</a>')
+
+@app.get("/calendar-auth")
+def calendar_auth():
+    from google_auth_oauthlib.flow import Flow
+    flow = Flow.from_client_secrets_file(
+        'credentials.json',
+        scopes=CALENDAR_SCOPES,
+        redirect_uri='https://studio-app-7y7z.onrender.com/calendar-callback'
+    )
+    auth_url, _ = flow.authorization_url(access_type='offline', prompt='consent')
+    return RedirectResponse(auth_url)
+
+@app.get("/calendar-callback")
+def calendar_callback(code: str = None):
+    from google_auth_oauthlib.flow import Flow
+    flow = Flow.from_client_secrets_file(
+        'credentials.json',
+        scopes=CALENDAR_SCOPES,
+        redirect_uri='https://studio-app-7y7z.onrender.com/calendar-callback'
+    )
+    flow.fetch_token(code=code)
+    creds = flow.credentials
+    with open(CALENDAR_TOKEN_FILE, 'w') as f:
+        f.write(creds.to_json())
+    return HTMLResponse("<h2>Calendar Connected!</h2><a href='/dashboard'>Back</a>")
+
+@app.get("/calendar-events")
+def calendar_events():
+    events = get_todays_events()
+    if not events:
+        return HTMLResponse("<h2>No events today</h2><a href='/dashboard'>Back</a>")
+    html = "<h2>Today's Events</h2><ul>"
+    for e in events:
+        summary = e.get('summary', 'Untitled')
+        start = e.get('start', {}).get('dateTime', 'All day')
+        html += f"<li>{summary} at {start}</li>"
+    html += "</ul><a href='/dashboard'>Back</a>"
+    return HTMLResponse(html)
+
+
 @app.get("/test")
 def test():
     return {"status": "ok", "message": "App is running with all features!"}
