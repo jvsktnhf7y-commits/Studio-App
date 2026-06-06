@@ -434,23 +434,48 @@ def auth_google():
 def callback(code: str = None, state: str = None):
     """Handle Google OAuth callback"""
     from google_auth_oauthlib.flow import Flow
+    from fastapi.responses import HTMLResponse
     import os
+    import traceback
     
-    flow = Flow.from_client_secrets_file(
-        'credentials.json',
-        scopes=['https://www.googleapis.com/auth/calendar'],
-        redirect_uri='https://studio-app-7y7z.onrender.com/callback'
-    )
-    
-    flow.fetch_token(code=code)
-    
-    # Save credentials
-    creds = flow.credentials
-    with open('token.json', 'w') as token:
-        token.write(creds.to_json())
-    
-    return HTMLResponse("""
-    <h2>✅ Google Calendar Connected!</h2>
-    <p>You can now close this window and return to the dashboard.</p>
-    <a href="/dashboard">Go to Dashboard</a>
-    """)
+    try:
+        print(f"Callback received with code: {code is not None}")
+        
+        flow = Flow.from_client_secrets_file(
+            'credentials.json',
+            scopes=['https://www.googleapis.com/auth/calendar'],
+            redirect_uri='https://studio-app-7y7z.onrender.com/callback'
+        )
+        
+        flow.fetch_token(code=code)
+        
+        # Save credentials
+        creds = flow.credentials
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
+        
+        return HTMLResponse("""
+        <html>
+        <head><title>Google Calendar Connected</title></head>
+        <body style="font-family: sans-serif; text-align: center; padding: 50px;">
+            <h2>✅ Google Calendar Connected!</h2>
+            <p>You can now close this window and return to the dashboard.</p>
+            <p><a href="/dashboard">Go to Dashboard</a></p>
+            <script>setTimeout(function(){ window.location.href = "/dashboard"; }, 3000);</script>
+        </body>
+        </html>
+        """)
+    except Exception as e:
+        error_details = traceback.format_exc()
+        print(f"Error in callback: {error_details}")
+        return HTMLResponse(f"""
+        <html>
+        <head><title>Error</title></head>
+        <body style="font-family: sans-serif; text-align: center; padding: 50px;">
+            <h2>❌ Error connecting to Google Calendar</h2>
+            <p>{str(e)}</p>
+            <p><a href="/auth/google">Try again</a></p>
+            <p><a href="/dashboard">Go to Dashboard</a></p>
+        </body>
+        </html>
+        """)
