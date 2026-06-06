@@ -408,3 +408,49 @@ def create_lesson(student_name: str = Form(...), date: str = Form(...), time: st
     return HTMLResponse(f"<div style='text-align:center;padding:50px'><h2>✅ Lesson Created!</h2><p>{student_name} on {date} at {time}</p><a href='/schedule'>Schedule Another</a> | <a href='/dashboard'>Dashboard</a></div>")
 
 print("✅ App ready with beautiful designs!")
+
+
+@app.get("/auth/google")
+def auth_google():
+    """Force Google Calendar authorization"""
+    from google_auth_oauthlib.flow import Flow
+    import os
+    
+    # Set up the flow
+    flow = Flow.from_client_secrets_file(
+        'credentials.json',
+        scopes=['https://www.googleapis.com/auth/calendar'],
+        redirect_uri='https://studio-app-7y7z.onrender.com/callback'
+    )
+    
+    auth_url, state = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true'
+    )
+    
+    return RedirectResponse(url=auth_url)
+
+@app.get("/callback")
+def callback(code: str = None, state: str = None):
+    """Handle Google OAuth callback"""
+    from google_auth_oauthlib.flow import Flow
+    import os
+    
+    flow = Flow.from_client_secrets_file(
+        'credentials.json',
+        scopes=['https://www.googleapis.com/auth/calendar'],
+        redirect_uri='https://studio-app-7y7z.onrender.com/callback'
+    )
+    
+    flow.fetch_token(code=code)
+    
+    # Save credentials
+    creds = flow.credentials
+    with open('token.json', 'w') as token:
+        token.write(creds.to_json())
+    
+    return HTMLResponse("""
+    <h2>✅ Google Calendar Connected!</h2>
+    <p>You can now close this window and return to the dashboard.</p>
+    <a href="/dashboard">Go to Dashboard</a>
+    """)
