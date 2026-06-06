@@ -7,6 +7,27 @@ from datetime import datetime
 import hashlib
 import json
 
+import os
+import json
+
+# Debug: Check if Google credentials are loaded
+print("🔍 Checking Google Calendar setup...")
+if os.path.exists('credentials.json'):
+    print("✅ credentials.json exists locally")
+else:
+    print("❌ credentials.json NOT found locally")
+    
+if os.environ.get('GOOGLE_CREDENTIALS'):
+    print("✅ GOOGLE_CREDENTIALS environment variable found")
+    # Write it to file
+    creds_json = os.environ.get('GOOGLE_CREDENTIALS')
+    with open('credentials.json', 'w') as f:
+        f.write(creds_json)
+    print("✅ Written credentials from environment to file")
+else:
+    print("❌ GOOGLE_CREDENTIALS environment variable NOT found")
+
+
 app = FastAPI(title="My Music Studio Automation")
 
 # Create static directory
