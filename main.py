@@ -136,6 +136,107 @@ def students_page():
     """)
 
 # Test endpoint
+
+
+# Student data functions
+PROFILES_FILE = "student_profiles.csv"
+PRICING_FILE = "pricing_tiers.csv"
+DEFAULT_RATE = 50.00
+
+def get_all_profiles():
+    profiles = {}
+    if os.path.exists(PROFILES_FILE):
+        with open(PROFILES_FILE, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                name = row.get("Name", "").strip()
+                if name:
+                    profiles[name] = {
+                        "tier_name": row.get("TierName", ""),
+                        "rate": float(row.get("Rate", DEFAULT_RATE)),
+                        "target_minutes": int(row.get("TargetMinutes", 60)),
+                        "credits": int(row.get("Credits", 0)),
+                        "description": row.get("Description", "")
+                    }
+    return profiles
+
+def save_all_profiles(profiles_map):
+    with open(PROFILES_FILE, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(["Name", "TierName", "Rate", "TargetMinutes", "Credits", "Description"])
+        for name, data in profiles_map.items():
+            writer.writerow([name, data['tier_name'], data['rate'], data['target_minutes'], data['credits'], data['description']])
+
+@app.get("/students", response_class=HTMLResponse)
+def students_page():
+    profiles = get_all_profiles()
+    
+    rows = ""
+    for name, data in profiles.items():
+        rows += f"""
+        <tr style="border-bottom: 1px solid #eee;">
+            <td style="padding: 12px;"><strong>{name}</strong></td>
+            <td style="padding: 12px;">${data['rate']}/hr</td>
+            <td style="padding: 12px;">{data['credits']}</td>
+            <td style="padding: 12px;">{data['description']}</td>
+        </tr>
+        """
+    
+    return HTMLResponse(f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Students</title>
+        <link rel="stylesheet" href="/static/style.css">
+        <style>
+            table {{ width: 100%; border-collapse: collapse; }}
+            th {{ background: #667eea; color: white; padding: 12px; text-align: left; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="card">
+                <h1>👥 Students</h1>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead>
+                            <tr><th>Name</th><th>Rate</th><th>Credits</th><th>Focus</th></tr>
+                        </thead>
+                        <tbody>
+                            {rows if rows else '<tr><td colspan="4" style="text-align:center">No students yet</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card">
+                <h2>➕ Add Student</h2>
+                <form action="/add-profile" method="post">
+                    <input type="text" name="name" placeholder="Student Name" style="width:100%; padding:10px; margin:5px 0;" required>
+                    <input type="text" name="rate_tier_name" placeholder="Pricing Tier" style="width:100%; padding:10px; margin:5px 0;" value="Standard">
+                    <input type="text" name="description" placeholder="Focus/Instrument" style="width:100%; padding:10px; margin:5px 0;">
+                    <button type="submit" class="btn" style="margin-top:10px;">Create Profile</button>
+                </form>
+            </div>
+            <a href="/dashboard" class="btn">← Back</a>
+        </div>
+    </body>
+    </html>
+    """)
+
+@app.post("/add-profile")
+def add_profile(name: str = Form(...), rate_tier_name: str = Form(...), description: str = Form(...)):
+    profiles = get_all_profiles()
+    profiles[name] = {
+        "tier_name": rate_tier_name,
+        "rate": DEFAULT_RATE,
+        "target_minutes": 60,
+        "credits": 0,
+        "description": description
+    }
+    save_all_profiles(profiles)
+    return RedirectResponse(url="/students", status_code=303)
+
+
 @app.get("/test")
 def test():
     return {"status": "ok", "message": "App is running!"}
