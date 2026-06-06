@@ -430,50 +430,70 @@ def auth_google():
     
     return RedirectResponse(url=auth_url)
 
+
 @app.get("/callback")
 def callback(code: str = None, state: str = None):
     """Handle Google OAuth callback"""
     from google_auth_oauthlib.flow import Flow
     from fastapi.responses import HTMLResponse
     import os
+    import json
     import traceback
     
     try:
-        print(f"Callback received with code: {code is not None}")
+        print("Callback received, fetching token...")
         
+        # Use the same scopes as the auth request
         flow = Flow.from_client_secrets_file(
             'credentials.json',
             scopes=['https://www.googleapis.com/auth/calendar'],
             redirect_uri='https://studio-app-7y7z.onrender.com/callback'
         )
         
+        # Fetch the token - this may return additional scopes but that's OK
         flow.fetch_token(code=code)
         
         # Save credentials
         creds = flow.credentials
-        with open('token.json', 'w') as token:
-            token.write(creds.to_json())
+        token_data = {
+            'token': creds.token,
+            'refresh_token': creds.refresh_token,
+            'token_uri': creds.token_uri,
+            'client_id': creds.client_id,
+            'client_secret': creds.client_secret,
+            'scopes': creds.scopes
+        }
+        
+        with open('token.json', 'w') as f:
+            json.dump(token_data, f)
         
         return HTMLResponse("""
         <html>
-        <head><title>Google Calendar Connected</title></head>
-        <body style="font-family: sans-serif; text-align: center; padding: 50px;">
-            <h2>✅ Google Calendar Connected!</h2>
-            <p>You can now close this window and return to the dashboard.</p>
-            <p><a href="/dashboard">Go to Dashboard</a></p>
+        <head>
+            <title>Success!</title>
+            <style>
+                body { font-family: sans-serif; text-align: center; padding: 50px; }
+                .success { color: green; }
+                .btn { display: inline-block; padding: 10px 20px; margin: 10px; background: #667eea; color: white; text-decoration: none; border-radius: 5px; }
+            </style>
+        </head>
+        <body>
+            <h2 class="success">✅ Google Calendar Connected!</h2>
+            <p>Your calendar has been successfully linked to Studio Console.</p>
+            <p>You can now see your events on the dashboard.</p>
+            <a href="/dashboard" class="btn">Go to Dashboard</a>
             <script>setTimeout(function(){ window.location.href = "/dashboard"; }, 3000);</script>
         </body>
         </html>
         """)
     except Exception as e:
-        error_details = traceback.format_exc()
-        print(f"Error in callback: {error_details}")
+        error_msg = str(e)
+        print(f"Error: {error_msg}")
         return HTMLResponse(f"""
         <html>
         <head><title>Error</title></head>
         <body style="font-family: sans-serif; text-align: center; padding: 50px;">
-            <h2>❌ Error connecting to Google Calendar</h2>
-            <p>{str(e)}</p>
+            <h2>❌ Error: {error_msg}</h2>
             <p><a href="/auth/google">Try again</a></p>
             <p><a href="/dashboard">Go to Dashboard</a></p>
         </body>
