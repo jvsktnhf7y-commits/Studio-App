@@ -7,26 +7,18 @@ from datetime import datetime
 import hashlib
 import json
 
-# Load Google credentials from environment variable (for Render)
-if os.environ.get('GOOGLE_CREDENTIALS') and not os.path.exists('credentials.json'):
-    with open('credentials.json', 'w') as f:
-        f.write(os.environ.get('GOOGLE_CREDENTIALS'))
-    print("✅ Loaded credentials from environment")
-
-
 app = FastAPI(title="Studio App")
 
 # Create static directory
 os.makedirs("static", exist_ok=True)
 
-# CSS
+# Simple CSS
 css_content = """
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; margin: 0; }
 .container { max-width: 1200px; margin: 0 auto; }
 .card { background: white; border-radius: 24px; padding: 30px; margin-bottom: 24px; box-shadow: 0 10px 40px rgba(0,0,0,0.1); }
 h1 { font-size: 48px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0 0 10px 0; }
 .btn { display: inline-block; padding: 12px 24px; border-radius: 12px; text-decoration: none; font-weight: 600; background: #667eea; color: white; margin: 5px; }
-.btn:hover { transform: translateY(-2px); }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }
 table { width: 100%; border-collapse: collapse; }
 th { background: #667eea; color: white; padding: 12px; text-align: left; }
@@ -112,22 +104,18 @@ def dashboard():
                 <a href="/students" class="card" style="text-align: center; text-decoration: none; color: #333;">
                     <div style="font-size: 48px;">👥</div>
                     <h3>Students</h3>
-                    <small>Manage profiles</small>
                 </a>
                 <a href="/rates" class="card" style="text-align: center; text-decoration: none; color: #333;">
                     <div style="font-size: 48px;">💰</div>
                     <h3>Rates</h3>
-                    <small>Pricing tiers</small>
                 </a>
                 <a href="/schedule" class="card" style="text-align: center; text-decoration: none; color: #333;">
                     <div style="font-size: 48px;">📅</div>
                     <h3>Schedule</h3>
-                    <small>Book lessons</small>
                 </a>
                 <a href="/logout" class="card" style="text-align: center; text-decoration: none; color: #333;">
                     <div style="font-size: 48px;">🚪</div>
                     <h3>Logout</h3>
-                    <small>End session</small>
                 </a>
             </div>
         </div>
@@ -191,35 +179,20 @@ async def auth_middleware(request: Request, call_next):
         return await call_next(request)
     return RedirectResponse(url="/login", status_code=303)
 
-# Students page
 @app.get("/students", response_class=HTMLResponse)
 def students_page():
     profiles = get_all_profiles()
     rows = ""
     for name, data in profiles.items():
         rows += f"<tr><td><strong>{name}</strong></td><td>${data['rate']}/hr</td><td>{data['credits']}</td><td>{data['description']}</td></tr>"
-    
     return HTMLResponse(f"""
     <!DOCTYPE html>
     <html>
     <head><title>Students</title><link rel="stylesheet" href="/static/style.css"></head>
     <body>
-        <div class="container">
-            <div class="card">
-                <h1>👥 Students</h1>
-                <div style="overflow-x:auto;">%able> <thead><tr><th>Name</th><th>Rate</th><th>Credits</th><th>Focus</th></tr></thead><tbody>{rows if rows else '<tr><td colspan="4">No students yet</td></tr>'}</tbody></table></div>
-            </div>
-            <div class="card">
-                <h2>➕ Add Student</h2>
-                <form action="/add-profile" method="post">
-                    <input type="text" name="name" placeholder="Student Name" required>
-                    <input type="text" name="rate_tier_name" placeholder="Pricing Tier" value="Standard">
-                    <input type="text" name="description" placeholder="Focus/Instrument">
-                    <button type="submit" class="btn">Create Profile</button>
-                </form>
-            </div>
-            <a href="/dashboard" class="btn">← Back</a>
-        </div>
+        <div class="container"><div class="card"><h1>👥 Students</h1><div style="overflow-x:auto;">{'<table><thead><tr><th>Name</th><th>Rate</th><th>Credits</th><th>Focus</th></tr></thead><tbody>' + rows if rows else '<p>No students yet</p>' + '</tbody></table>'}</div></div>
+        <div class="card"><h2>➕ Add Student</h2><form action="/add-profile" method="post"><input type="text" name="name" placeholder="Student Name" required><input type="text" name="rate_tier_name" placeholder="Pricing Tier" value="Standard"><input type="text" name="description" placeholder="Focus/Instrument"><button type="submit" class="btn">Create Profile</button></form></div>
+        <a href="/dashboard" class="btn">← Back</a></div>
     </body>
     </html>
     """)
@@ -231,35 +204,20 @@ def add_profile(name: str = Form(...), rate_tier_name: str = Form(...), descript
     save_all_profiles(profiles)
     return RedirectResponse(url="/students", status_code=303)
 
-# Rates page
 @app.get("/rates", response_class=HTMLResponse)
 def rates_page():
     tiers = get_pricing_tiers()
     rows = ""
     for name, data in tiers.items():
         rows += f"<tr><td><strong>{name}</strong></td><td>${data['rate']}/hr</td><td>{data['minutes']} min</td></tr>"
-    
     return HTMLResponse(f"""
     <!DOCTYPE html>
     <html>
     <head><title>Rates</title><link rel="stylesheet" href="/static/style.css"></head>
     <body>
-        <div class="container">
-            <div class="card">
-                <h1>💰 Pricing Tiers</h1>
-                <div style="overflow-x:auto;">%able> <thead><tr><th>Tier</th><th>Rate</th><th>Duration</th></tr></thead><tbody>{rows if rows else '<tr><td colspan="3">No tiers yet</td></tr>'}</tbody></table></div>
-            </div>
-            <div class="card">
-                <h2>➕ Add Pricing Tier</h2>
-                <form action="/save-pricing-tier" method="post">
-                    <input type="text" name="tier_name" placeholder="Tier Name" required>
-                    <input type="number" step="0.01" name="hourly_rate" placeholder="Hourly Rate" required>
-                    <input type="number" name="target_minutes" placeholder="Minutes" value="60">
-                    <button type="submit" class="btn">Create Tier</button>
-                </form>
-            </div>
-            <a href="/dashboard" class="btn">← Back</a>
-        </div>
+        <div class="container"><div class="card"><h1>💰 Pricing Tiers</h1>{'<table><thead><tr><th>Tier</th><th>Rate</th><th>Duration</th></tr></thead><tbody>' + rows if rows else '<p>No tiers yet</p>' + '</tbody></table>'}</div>
+        <div class="card"><h2>➕ Add Pricing Tier</h2><form action="/save-pricing-tier" method="post"><input type="text" name="tier_name" placeholder="Tier Name" required><input type="number" step="0.01" name="hourly_rate" placeholder="Hourly Rate" required><input type="number" name="target_minutes" placeholder="Minutes" value="60"><button type="submit" class="btn">Create Tier</button></form></div>
+        <a href="/dashboard" class="btn">← Back</a></div>
     </body>
     </html>
     """)
@@ -271,163 +229,122 @@ def save_pricing_tier(tier_name: str = Form(...), hourly_rate: float = Form(...)
     save_pricing_tiers(tiers)
     return RedirectResponse(url="/rates", status_code=303)
 
-@app.post("/delete-pricing-tier")
-def delete_pricing_tier(tier_name: str = Form(...)):
-    tiers = get_pricing_tiers()
-    if tier_name in tiers:
-        del tiers[tier_name]
-        save_pricing_tiers(tiers)
-    return RedirectResponse(url="/rates", status_code=303)
-
-# Schedule page
 @app.get("/schedule", response_class=HTMLResponse)
 def schedule_page():
     students = get_all_profiles()
     options = ""
     for name in students.keys():
         options += f'<option value="{name}">{name}</option>'
-    
     return HTMLResponse(f"""
     <!DOCTYPE html>
     <html>
     <head><title>Schedule</title><link rel="stylesheet" href="/static/style.css"></head>
     <body>
-        <div class="container">
-            <div class="card">
-                <h1>📅 Schedule Lesson</h1>
-                <form action="/create-lesson" method="post">
-                    <select name="student_name" required><option value="">Select Student</option>{options}</select>
-                    <input type="date" name="date" required>
-                    <input type="time" name="time" required>
-                    <select name="duration"><option value="30">30 min</option><option value="60" selected>60 min</option><option value="90">90 min</option></select>
-                    <button type="submit" class="btn">Create Lesson</button>
-                </form>
-            </div>
-            <a href="/dashboard" class="btn">← Back</a>
-        </div>
+        <div class="container"><div class="card"><h1>📅 Schedule Lesson</h1><form action="/create-lesson" method="post"><select name="student_name" required><option value="">Select Student</option>{options}</select><input type="date" name="date" required><input type="time" name="time" required><select name="duration"><option value="30">30 min</option><option value="60" selected>60 min</option><option value="90">90 min</option></select><button type="submit" class="btn">Create Lesson</button></form></div>
+        <a href="/dashboard" class="btn">← Back</a></div>
     </body>
     </html>
     """)
 
 @app.post("/create-lesson")
 def create_lesson(student_name: str = Form(...), date: str = Form(...), time: str = Form(...), duration: int = Form(60)):
-    return HTMLResponse(f"""
-    <!DOCTYPE html>
-    <html>
-    <head><title>Lesson Created</title><link rel="stylesheet" href="/static/style.css"></head>
-    <body>
-        <div class="container">
-            <div class="card" style="text-align:center;">
-                <h1>✅ Lesson Created!</h1>
-                <p><strong>{student_name}</strong> on {date} at {time} for {duration} minutes</p>
-                <a href="/schedule" class="btn">Schedule Another</a>
-                <a href="/dashboard" class="btn">Dashboard</a>
-            </div>
-        </div>
-    </body>
-    </html>
-    """)
+    return HTMLResponse(f"""<!DOCTYPE html><html><head><title>Lesson Created</title><link rel="stylesheet" href="/static/style.css"></head><body><div class="container"><div class="card" style="text-align:center;"><h1>✅ Lesson Created!</h1><p><strong>{student_name}</strong> on {date} at {time} for {duration} minutes</p><a href="/schedule" class="btn">Schedule Another</a><a href="/dashboard" class="btn">Dashboard</a></div></div></body></html>""")
 
-# Test endpoint
-
-
-# Google Calendar Integration
-from google.auth.transport.requests import Request as GoogleRequest
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
-import pytz
-
-CALENDAR_SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
-CALENDAR_TOKEN_FILE = 'calendar_token.json'
-
-def get_calendar_service():
-    creds = None
-    if os.path.exists(CALENDAR_TOKEN_FILE):
-        creds = Credentials.from_authorized_user_file(CALENDAR_TOKEN_FILE, CALENDAR_SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(GoogleRequest())
-        else:
-            if not os.path.exists('credentials.json'):
-                return None
-            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', CALENDAR_SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open(CALENDAR_TOKEN_FILE, 'w') as token:
-            token.write(creds.to_json())
-    return build('calendar', 'v3', credentials=creds)
-
-def get_todays_events():
-    try:
-        service = get_calendar_service()
-        if not service:
-            return []
-        local_tz = pytz.timezone('America/New_York')
-        now = datetime.now(local_tz)
-        start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=0)
-        start_utc = start_of_day.astimezone(pytz.UTC).isoformat()
-        end_utc = end_of_day.astimezone(pytz.UTC).isoformat()
-        events_result = service.events().list(
-            calendarId='primary',
-            timeMin=start_utc,
-            timeMax=end_utc,
-            singleEvents=True,
-            orderBy='startTime'
-        ).execute()
-        return events_result.get('items', [])
-    except Exception as e:
-        print(f"Calendar error: {e}")
-        return []
-
-@app.get("/calendar-setup")
-def calendar_setup():
-    if not os.path.exists('credentials.json'):
-        return HTMLResponse("<h2>No credentials.json</h2><a href='/dashboard'>Back</a>")
-    return HTMLResponse('<h2>Go to /calendar-auth to authorize</h2><a href="/calendar-auth">Authorize</a>')
-
+# Google Calendar endpoint
 @app.get("/calendar-auth")
 def calendar_auth():
     from google_auth_oauthlib.flow import Flow
-    flow = Flow.from_client_secrets_file(
-        'credentials.json',
-        scopes=CALENDAR_SCOPES,
-        redirect_uri='https://studio-app-7y7z.onrender.com/calendar-callback'
-    )
-    auth_url, _ = flow.authorization_url(access_type='offline', prompt='consent')
-    return RedirectResponse(auth_url)
+    from fastapi.responses import RedirectResponse, HTMLResponse
+    import os
+    import json
+    
+    creds_json = os.environ.get('GOOGLE_CREDENTIALS', '')
+    if not creds_json:
+        return HTMLResponse("<h2>❌ GOOGLE_CREDENTIALS not set</h2>")
+    
+    try:
+        client_config = json.loads(creds_json)
+        if 'web' not in client_config:
+            client_config = {"web": client_config}
+        
+        flow = Flow.from_client_config(
+            client_config,
+            scopes=['https://www.googleapis.com/auth/calendar.readonly'],
+            redirect_uri='https://studio-app-7y7z.onrender.com/calendar-callback'
+        )
+        auth_url, _ = flow.authorization_url(access_type='offline', prompt='consent')
+        return RedirectResponse(auth_url)
+    except Exception as e:
+        return HTMLResponse(f"<h2>Error: {str(e)}</h2>")
 
 @app.get("/calendar-callback")
 def calendar_callback(code: str = None):
     from google_auth_oauthlib.flow import Flow
-    flow = Flow.from_client_secrets_file(
-        'credentials.json',
-        scopes=CALENDAR_SCOPES,
+    from fastapi.responses import HTMLResponse
+    import os
+    import json
+    
+    creds_json = os.environ.get('GOOGLE_CREDENTIALS', '')
+    client_config = json.loads(creds_json)
+    if 'web' not in client_config:
+        client_config = {"web": client_config}
+    
+    flow = Flow.from_client_config(
+        client_config,
+        scopes=['https://www.googleapis.com/auth/calendar.readonly'],
         redirect_uri='https://studio-app-7y7z.onrender.com/calendar-callback'
     )
     flow.fetch_token(code=code)
-    creds = flow.credentials
-    with open(CALENDAR_TOKEN_FILE, 'w') as f:
-        f.write(creds.to_json())
-    return HTMLResponse("<h2>Calendar Connected!</h2><a href='/dashboard'>Back</a>")
+    
+    # Save token
+    token_data = flow.credentials.to_json()
+    with open('calendar_token.json', 'w') as f:
+        f.write(token_data)
+    
+    return HTMLResponse("<h2>✅ Calendar Connected!</h2><a href='/dashboard'>Back</a>")
 
 @app.get("/calendar-events")
 def calendar_events():
-    events = get_todays_events()
-    if not events:
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+    import json
+    from datetime import datetime
+    import pytz
+    
+    if not os.path.exists('calendar_token.json'):
+        return HTMLResponse("<h2>Calendar not connected. Go to /calendar-auth first.</h2>")
+    
+    with open('calendar_token.json', 'r') as f:
+        token_data = json.load(f)
+    
+    creds = Credentials.from_authorized_user_info(token_data)
+    service = build('calendar', 'v3', credentials=creds)
+    
+    tz = pytz.timezone('America/New_York')
+    now = datetime.now(tz)
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = now.replace(hour=23, minute=59, second=59, microsecond=0)
+    
+    start_utc = start.astimezone(pytz.UTC).isoformat()
+    end_utc = end.astimezone(pytz.UTC).isoformat()
+    
+    events = service.events().list(calendarId='primary', timeMin=start_utc, timeMax=end_utc, singleEvents=True).execute()
+    items = events.get('items', [])
+    
+    if not items:
         return HTMLResponse("<h2>No events today</h2><a href='/dashboard'>Back</a>")
+    
     html = "<h2>Today's Events</h2><ul>"
-    for e in events:
+    for e in items:
         summary = e.get('summary', 'Untitled')
-        start = e.get('start', {}).get('dateTime', 'All day')
-        html += f"<li>{summary} at {start}</li>"
+        start_time = e.get('start', {}).get('dateTime', 'All day')
+        html += f"<li>{summary} at {start_time}</li>"
     html += "</ul><a href='/dashboard'>Back</a>"
     return HTMLResponse(html)
 
-
 @app.get("/test")
 def test():
-    return {"status": "ok", "message": "App is running with all features!"}
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     import uvicorn
