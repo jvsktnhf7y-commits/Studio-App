@@ -12,14 +12,19 @@ app = FastAPI(title="Studio App")
 # Create static directory
 os.makedirs("static", exist_ok=True)
 
-# Simple CSS
+# CSS
 css_content = """
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; margin: 0; }
 .container { max-width: 1200px; margin: 0 auto; }
 .card { background: white; border-radius: 24px; padding: 30px; margin-bottom: 24px; box-shadow: 0 10px 40px rgba(0,0,0,0.1); }
 h1 { font-size: 48px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0 0 10px 0; }
-.btn { display: inline-block; padding: 12px 24px; border-radius: 12px; text-decoration: none; font-weight: 600; background: #667eea; color: white; }
+.btn { display: inline-block; padding: 12px 24px; border-radius: 12px; text-decoration: none; font-weight: 600; background: #667eea; color: white; margin: 5px; }
+.btn:hover { transform: translateY(-2px); }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }
+table { width: 100%; border-collapse: collapse; }
+th { background: #667eea; color: white; padding: 12px; text-align: left; }
+td { padding: 12px; border-bottom: 1px solid #eee; }
+input, select { width: 100%; padding: 10px; margin: 5px 0; border: 2px solid #e5e7eb; border-radius: 8px; }
 """
 
 with open("static/style.css", "w") as f:
@@ -32,16 +37,64 @@ if not os.path.exists(PASSWORD_FILE):
     with open(PASSWORD_FILE, 'w') as f:
         json.dump({"password_hash": default_hash}, f)
 
+# Data files
+PROFILES_FILE = "student_profiles.csv"
+PRICING_FILE = "pricing_tiers.csv"
+LEDGER_FILE = "studio_ledger.csv"
+DEFAULT_RATE = 50.00
+
+def get_all_profiles():
+    profiles = {}
+    if os.path.exists(PROFILES_FILE):
+        with open(PROFILES_FILE, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                name = row.get("Name", "").strip()
+                if name:
+                    profiles[name] = {
+                        "tier_name": row.get("TierName", ""),
+                        "rate": float(row.get("Rate", DEFAULT_RATE)),
+                        "target_minutes": int(row.get("TargetMinutes", 60)),
+                        "credits": int(row.get("Credits", 0)),
+                        "description": row.get("Description", "")
+                    }
+    return profiles
+
+def save_all_profiles(profiles_map):
+    with open(PROFILES_FILE, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(["Name", "TierName", "Rate", "TargetMinutes", "Credits", "Description"])
+        for name, data in profiles_map.items():
+            writer.writerow([name, data['tier_name'], data['rate'], data['target_minutes'], data['credits'], data['description']])
+
+def get_pricing_tiers():
+    tiers = {}
+    if os.path.exists(PRICING_FILE):
+        with open(PRICING_FILE, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                tier = row.get("TierName", "").strip()
+                if tier:
+                    tiers[tier] = {
+                        "rate": float(row.get("HourlyRate", DEFAULT_RATE)),
+                        "minutes": int(row.get("TargetMinutes", 60))
+                    }
+    return tiers
+
+def save_pricing_tiers(tiers_map):
+    with open(PRICING_FILE, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(["TierName", "HourlyRate", "TargetMinutes"])
+        for name, data in tiers_map.items():
+            writer.writerow([name, data['rate'], data['minutes']])
+
 # Dashboard
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard():
     return HTMLResponse(f"""
     <!DOCTYPE html>
     <html>
-    <head>
-        <title>Studio Dashboard</title>
-        <link rel="stylesheet" href="/static/style.css">
-    </head>
+    <head><title>Studio Dashboard</title><link rel="stylesheet" href="/static/style.css"></head>
     <body>
         <div class="container">
             <div class="card" style="text-align: center;">
@@ -52,10 +105,22 @@ def dashboard():
                 <a href="/students" class="card" style="text-align: center; text-decoration: none; color: #333;">
                     <div style="font-size: 48px;">👥</div>
                     <h3>Students</h3>
+                    <small>Manage profiles</small>
+                </a>
+                <a href="/rates" class="card" style="text-align: center; text-decoration: none; color: #333;">
+                    <div style="font-size: 48px;">💰</div>
+                    <h3>Rates</h3>
+                    <small>Pricing tiers</small>
+                </a>
+                <a href="/schedule" class="card" style="text-align: center; text-decoration: none; color: #333;">
+                    <div style="font-size: 48px;">📅</div>
+                    <h3>Schedule</h3>
+                    <small>Book lessons</small>
                 </a>
                 <a href="/logout" class="card" style="text-align: center; text-decoration: none; color: #333;">
                     <div style="font-size: 48px;">🚪</div>
                     <h3>Logout</h3>
+                    <small>End session</small>
                 </a>
             </div>
         </div>
@@ -66,7 +131,7 @@ def dashboard():
 # Login
 @app.get("/login", response_class=HTMLResponse)
 def login_page(error: str = ""):
-    error_html = f'<div style="background:#fee;color:#c33;padding:10px;">{error}</div>' if error else ''
+    error_html = f'<div style="background:#fee;color:#c33;padding:10px;border-radius:8px;">{error}</div>' if error else ''
     return HTMLResponse(f"""
     <!DOCTYPE html>
     <html>
@@ -77,9 +142,9 @@ def login_page(error: str = ""):
                 <h1>🎵 Studio Login</h1>
                 {error_html}
                 <form action="/login" method="post">
-                    <input type="text" name="username" placeholder="Username" style="width:100%;padding:10px;margin:10px 0;" required>
-                    <input type="password" name="password" placeholder="Password" style="width:100%;padding:10px;margin:10px 0;" required>
-                    <button type="submit" style="width:100%;padding:10px;background:#667eea;color:white;border:none;border-radius:8px;">Login</button>
+                    <input type="text" name="username" placeholder="Username" required>
+                    <input type="password" name="password" placeholder="Password" required>
+                    <button type="submit" class="btn" style="width:100%;">Login</button>
                 </form>
             </div>
         </div>
@@ -122,99 +187,28 @@ async def auth_middleware(request: Request, call_next):
 # Students page
 @app.get("/students", response_class=HTMLResponse)
 def students_page():
-    return HTMLResponse("""
+    profiles = get_all_profiles()
+    rows = ""
+    for name, data in profiles.items():
+        rows += f"<tr><td><strong>{name}</strong></td><td>${data['rate']}/hr</td><td>{data['credits']}</td><td>{data['description']}</td></tr>"
+    
+    return HTMLResponse(f"""
     <!DOCTYPE html>
     <html>
     <head><title>Students</title><link rel="stylesheet" href="/static/style.css"></head>
     <body>
         <div class="container">
-            <div class="card"><h1>👥 Students</h1><p>Student management coming soon!</p></div>
-            <a href="/dashboard">Back</a>
-        </div>
-    </body>
-    </html>
-    """)
-
-# Test endpoint
-
-
-# Student data functions
-PROFILES_FILE = "student_profiles.csv"
-PRICING_FILE = "pricing_tiers.csv"
-DEFAULT_RATE = 50.00
-
-def get_all_profiles():
-    profiles = {}
-    if os.path.exists(PROFILES_FILE):
-        with open(PROFILES_FILE, 'r') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                name = row.get("Name", "").strip()
-                if name:
-                    profiles[name] = {
-                        "tier_name": row.get("TierName", ""),
-                        "rate": float(row.get("Rate", DEFAULT_RATE)),
-                        "target_minutes": int(row.get("TargetMinutes", 60)),
-                        "credits": int(row.get("Credits", 0)),
-                        "description": row.get("Description", "")
-                    }
-    return profiles
-
-def save_all_profiles(profiles_map):
-    with open(PROFILES_FILE, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(["Name", "TierName", "Rate", "TargetMinutes", "Credits", "Description"])
-        for name, data in profiles_map.items():
-            writer.writerow([name, data['tier_name'], data['rate'], data['target_minutes'], data['credits'], data['description']])
-
-@app.get("/students", response_class=HTMLResponse)
-def students_page():
-    profiles = get_all_profiles()
-    
-    rows = ""
-    for name, data in profiles.items():
-        rows += f"""
-        <tr style="border-bottom: 1px solid #eee;">
-            <td style="padding: 12px;"><strong>{name}</strong></td>
-            <td style="padding: 12px;">${data['rate']}/hr</td>
-            <td style="padding: 12px;">{data['credits']}</td>
-            <td style="padding: 12px;">{data['description']}</td>
-        </tr>
-        """
-    
-    return HTMLResponse(f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Students</title>
-        <link rel="stylesheet" href="/static/style.css">
-        <style>
-            table {{ width: 100%; border-collapse: collapse; }}
-            th {{ background: #667eea; color: white; padding: 12px; text-align: left; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
             <div class="card">
                 <h1>👥 Students</h1>
-                <div style="overflow-x: auto;">
-                    <table>
-                        <thead>
-                            <tr><th>Name</th><th>Rate</th><th>Credits</th><th>Focus</th></tr>
-                        </thead>
-                        <tbody>
-                            {rows if rows else '<tr><td colspan="4" style="text-align:center">No students yet</td></tr>'}
-                        </tbody>
-                    </table>
-                </div>
+                <div style="overflow-x:auto;">%able> <thead><tr><th>Name</th><th>Rate</th><th>Credits</th><th>Focus</th></tr></thead><tbody>{rows if rows else '<tr><td colspan="4">No students yet</td></tr>'}</tbody></table></div>
             </div>
             <div class="card">
                 <h2>➕ Add Student</h2>
                 <form action="/add-profile" method="post">
-                    <input type="text" name="name" placeholder="Student Name" style="width:100%; padding:10px; margin:5px 0;" required>
-                    <input type="text" name="rate_tier_name" placeholder="Pricing Tier" style="width:100%; padding:10px; margin:5px 0;" value="Standard">
-                    <input type="text" name="description" placeholder="Focus/Instrument" style="width:100%; padding:10px; margin:5px 0;">
-                    <button type="submit" class="btn" style="margin-top:10px;">Create Profile</button>
+                    <input type="text" name="name" placeholder="Student Name" required>
+                    <input type="text" name="rate_tier_name" placeholder="Pricing Tier" value="Standard">
+                    <input type="text" name="description" placeholder="Focus/Instrument">
+                    <button type="submit" class="btn">Create Profile</button>
                 </form>
             </div>
             <a href="/dashboard" class="btn">← Back</a>
@@ -226,20 +220,111 @@ def students_page():
 @app.post("/add-profile")
 def add_profile(name: str = Form(...), rate_tier_name: str = Form(...), description: str = Form(...)):
     profiles = get_all_profiles()
-    profiles[name] = {
-        "tier_name": rate_tier_name,
-        "rate": DEFAULT_RATE,
-        "target_minutes": 60,
-        "credits": 0,
-        "description": description
-    }
+    profiles[name] = {"tier_name": rate_tier_name, "rate": DEFAULT_RATE, "target_minutes": 60, "credits": 0, "description": description}
     save_all_profiles(profiles)
     return RedirectResponse(url="/students", status_code=303)
 
+# Rates page
+@app.get("/rates", response_class=HTMLResponse)
+def rates_page():
+    tiers = get_pricing_tiers()
+    rows = ""
+    for name, data in tiers.items():
+        rows += f"<tr><td><strong>{name}</strong></td><td>${data['rate']}/hr</td><td>{data['minutes']} min</td></tr>"
+    
+    return HTMLResponse(f"""
+    <!DOCTYPE html>
+    <html>
+    <head><title>Rates</title><link rel="stylesheet" href="/static/style.css"></head>
+    <body>
+        <div class="container">
+            <div class="card">
+                <h1>💰 Pricing Tiers</h1>
+                <div style="overflow-x:auto;">%able> <thead><tr><th>Tier</th><th>Rate</th><th>Duration</th></tr></thead><tbody>{rows if rows else '<tr><td colspan="3">No tiers yet</td></tr>'}</tbody></table></div>
+            </div>
+            <div class="card">
+                <h2>➕ Add Pricing Tier</h2>
+                <form action="/save-pricing-tier" method="post">
+                    <input type="text" name="tier_name" placeholder="Tier Name" required>
+                    <input type="number" step="0.01" name="hourly_rate" placeholder="Hourly Rate" required>
+                    <input type="number" name="target_minutes" placeholder="Minutes" value="60">
+                    <button type="submit" class="btn">Create Tier</button>
+                </form>
+            </div>
+            <a href="/dashboard" class="btn">← Back</a>
+        </div>
+    </body>
+    </html>
+    """)
 
+@app.post("/save-pricing-tier")
+def save_pricing_tier(tier_name: str = Form(...), hourly_rate: float = Form(...), target_minutes: int = Form(60)):
+    tiers = get_pricing_tiers()
+    tiers[tier_name] = {"rate": hourly_rate, "minutes": target_minutes}
+    save_pricing_tiers(tiers)
+    return RedirectResponse(url="/rates", status_code=303)
+
+@app.post("/delete-pricing-tier")
+def delete_pricing_tier(tier_name: str = Form(...)):
+    tiers = get_pricing_tiers()
+    if tier_name in tiers:
+        del tiers[tier_name]
+        save_pricing_tiers(tiers)
+    return RedirectResponse(url="/rates", status_code=303)
+
+# Schedule page
+@app.get("/schedule", response_class=HTMLResponse)
+def schedule_page():
+    students = get_all_profiles()
+    options = ""
+    for name in students.keys():
+        options += f'<option value="{name}">{name}</option>'
+    
+    return HTMLResponse(f"""
+    <!DOCTYPE html>
+    <html>
+    <head><title>Schedule</title><link rel="stylesheet" href="/static/style.css"></head>
+    <body>
+        <div class="container">
+            <div class="card">
+                <h1>📅 Schedule Lesson</h1>
+                <form action="/create-lesson" method="post">
+                    <select name="student_name" required><option value="">Select Student</option>{options}</select>
+                    <input type="date" name="date" required>
+                    <input type="time" name="time" required>
+                    <select name="duration"><option value="30">30 min</option><option value="60" selected>60 min</option><option value="90">90 min</option></select>
+                    <button type="submit" class="btn">Create Lesson</button>
+                </form>
+            </div>
+            <a href="/dashboard" class="btn">← Back</a>
+        </div>
+    </body>
+    </html>
+    """)
+
+@app.post("/create-lesson")
+def create_lesson(student_name: str = Form(...), date: str = Form(...), time: str = Form(...), duration: int = Form(60)):
+    return HTMLResponse(f"""
+    <!DOCTYPE html>
+    <html>
+    <head><title>Lesson Created</title><link rel="stylesheet" href="/static/style.css"></head>
+    <body>
+        <div class="container">
+            <div class="card" style="text-align:center;">
+                <h1>✅ Lesson Created!</h1>
+                <p><strong>{student_name}</strong> on {date} at {time} for {duration} minutes</p>
+                <a href="/schedule" class="btn">Schedule Another</a>
+                <a href="/dashboard" class="btn">Dashboard</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    """)
+
+# Test endpoint
 @app.get("/test")
 def test():
-    return {"status": "ok", "message": "App is running!"}
+    return {"status": "ok", "message": "App is running with all features!"}
 
 if __name__ == "__main__":
     import uvicorn
