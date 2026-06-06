@@ -7,8 +7,82 @@ from datetime import datetime
 import hashlib
 import json
 
+# Store token in memory and file
+TOKEN_STORAGE = {}
+
+def save_token(creds):
+    """Save token both to file and memory"""
+    global TOKEN_STORAGE
+    token_data = {
+        'token': creds.token,
+        'refresh_token': creds.refresh_token,
+        'token_uri': creds.token_uri,
+        'client_id': creds.client_id,
+        'client_secret': creds.client_secret,
+        'scopes': creds.scopes,
+        'expiry': creds.expiry.isoformat() if creds.expiry else None
+    }
+    TOKEN_STORAGE['creds'] = token_data
+    # Also try to save to file
+    try:
+        with open('token.json', 'w') as f:
+            json.dump(token_data, f)
+        print("✅ Token saved to file")
+    except:
+        print("⚠️ Could not save token to file")
+    return True
+
+def load_token():
+    """Load token from memory or file"""
+    global TOKEN_STORAGE
+    if TOKEN_STORAGE.get('creds'):
+        return TOKEN_STORAGE['creds']
+    try:
+        with open('token.json', 'r') as f:
+            return json.load(f)
+    except:
+        return None
+
+
 import os
 import json
+
+# Store token in memory and file
+TOKEN_STORAGE = {}
+
+def save_token(creds):
+    """Save token both to file and memory"""
+    global TOKEN_STORAGE
+    token_data = {
+        'token': creds.token,
+        'refresh_token': creds.refresh_token,
+        'token_uri': creds.token_uri,
+        'client_id': creds.client_id,
+        'client_secret': creds.client_secret,
+        'scopes': creds.scopes,
+        'expiry': creds.expiry.isoformat() if creds.expiry else None
+    }
+    TOKEN_STORAGE['creds'] = token_data
+    # Also try to save to file
+    try:
+        with open('token.json', 'w') as f:
+            json.dump(token_data, f)
+        print("✅ Token saved to file")
+    except:
+        print("⚠️ Could not save token to file")
+    return True
+
+def load_token():
+    """Load token from memory or file"""
+    global TOKEN_STORAGE
+    if TOKEN_STORAGE.get('creds'):
+        return TOKEN_STORAGE['creds']
+    try:
+        with open('token.json', 'r') as f:
+            return json.load(f)
+    except:
+        return None
+
 
 # Debug: Check if Google credentials are loaded
 print("🔍 Checking Google Calendar setup...")
@@ -438,6 +512,43 @@ def callback(code: str = None, state: str = None):
     from fastapi.responses import HTMLResponse
     import os
     import json
+
+# Store token in memory and file
+TOKEN_STORAGE = {}
+
+def save_token(creds):
+    """Save token both to file and memory"""
+    global TOKEN_STORAGE
+    token_data = {
+        'token': creds.token,
+        'refresh_token': creds.refresh_token,
+        'token_uri': creds.token_uri,
+        'client_id': creds.client_id,
+        'client_secret': creds.client_secret,
+        'scopes': creds.scopes,
+        'expiry': creds.expiry.isoformat() if creds.expiry else None
+    }
+    TOKEN_STORAGE['creds'] = token_data
+    # Also try to save to file
+    try:
+        with open('token.json', 'w') as f:
+            json.dump(token_data, f)
+        print("✅ Token saved to file")
+    except:
+        print("⚠️ Could not save token to file")
+    return True
+
+def load_token():
+    """Load token from memory or file"""
+    global TOKEN_STORAGE
+    if TOKEN_STORAGE.get('creds'):
+        return TOKEN_STORAGE['creds']
+    try:
+        with open('token.json', 'r') as f:
+            return json.load(f)
+    except:
+        return None
+
     import traceback
     
     try:
@@ -505,6 +616,43 @@ def callback(code: str = None, state: str = None):
 def test_calendar():
     """Simple test to verify Google Calendar connection"""
     import json
+
+# Store token in memory and file
+TOKEN_STORAGE = {}
+
+def save_token(creds):
+    """Save token both to file and memory"""
+    global TOKEN_STORAGE
+    token_data = {
+        'token': creds.token,
+        'refresh_token': creds.refresh_token,
+        'token_uri': creds.token_uri,
+        'client_id': creds.client_id,
+        'client_secret': creds.client_secret,
+        'scopes': creds.scopes,
+        'expiry': creds.expiry.isoformat() if creds.expiry else None
+    }
+    TOKEN_STORAGE['creds'] = token_data
+    # Also try to save to file
+    try:
+        with open('token.json', 'w') as f:
+            json.dump(token_data, f)
+        print("✅ Token saved to file")
+    except:
+        print("⚠️ Could not save token to file")
+    return True
+
+def load_token():
+    """Load token from memory or file"""
+    global TOKEN_STORAGE
+    if TOKEN_STORAGE.get('creds'):
+        return TOKEN_STORAGE['creds']
+    try:
+        with open('token.json', 'r') as f:
+            return json.load(f)
+    except:
+        return None
+
     from google.oauth2.credentials import Credentials
     from googleapiclient.discovery import build
     
