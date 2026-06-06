@@ -303,6 +303,7 @@ def calendar_callback(code: str = None):
     
     return HTMLResponse("<h2>✅ Calendar Connected!</h2><a href='/dashboard'>Back</a>")
 
+
 @app.get("/calendar-events")
 def calendar_events():
     from google.oauth2.credentials import Credentials
@@ -320,28 +321,71 @@ def calendar_events():
     creds = Credentials.from_authorized_user_info(token_data)
     service = build('calendar', 'v3', credentials=creds)
     
-    tz = pytz.timezone('America/New_York')
-    now = datetime.now(tz)
+    # Get user's timezone from calendar settings
+    settings = service.settings().get(setting='timezone').execute()
+    user_tz_str = settings.get('value', 'America/New_York')
+    user_tz = pytz.timezone(user_tz_str)
+    
+    now = datetime.now(user_tz)
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     end = now.replace(hour=23, minute=59, second=59, microsecond=0)
     
     start_utc = start.astimezone(pytz.UTC).isoformat()
     end_utc = end.astimezone(pytz.UTC).isoformat()
     
-    events = service.events().list(calendarId='primary', timeMin=start_utc, timeMax=end_utc, singleEvents=True).execute()
-    items = events.get('items', [])
+    events_result = service.events().list(
+        calendarId='primary',
+        timeMin=start_utc,
+        timeMax=end_utc,
+        singleEvents=True,
+        orderBy='startTime'
+    ).execute()
     
-    if not items:
-        return HTMLResponse("<h2>No events today</h2><a href='/dashboard'>Back</a>")
+    events = events_result.get('items', [])
     
-    html = "<h2>Today's Events</h2><ul>"
-    for e in items:
+    # Build debug info
+    debug_info = f"""
+    <p><strong>Your timezone:</strong> {user_tz_str}</p>
+    <p><strong>Searching from:</strong> {start_utc}</p>
+    <p><strong>Searching to:</strong> {end_utc}</p>
+    <p><strong>Current time (your timezone):</strong> {now.strftime('%Y-%m-%d %H:%M:%S')}</p>
+    <p><strong>Events found:</strong> {len(events)}</p>
+    """
+    
+    if not events:
+        return HTMLResponse(f"""
+        <html>
+        <body style="padding:20px; font-family:sans-serif;">
+            <h2>No events found for today</h2>
+            {debug_info}
+            <p>Make sure you have events in your primary Google Calendar for today.</p>
+            <a href="/dashboard">Back to Dashboard</a>
+        </body>
+        </html>
+        """)
+    
+    event_list = "<ul>"
+    for e in events:
         summary = e.get('summary', 'Untitled')
         start_time = e.get('start', {}).get('dateTime', 'All day')
-        html += f"<li>{summary} at {start_time}</li>"
-    html += "</ul><a href='/dashboard'>Back</a>"
-    return HTMLResponse(html)
-
+        if start_time and 'T' in start_time:
+            # Convert to local time for display
+            dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+            local_dt = dt.astimezone(user_tz)
+            start_time = local_dt.strftime('%I:%M %p')
+        event_list += f"<li><strong>{summary}</strong> at {start_time}</li>"
+    event_list += "</ul>"
+    
+    return HTMLResponse(f"""
+    <html>
+    <body style="padding:20px; font-family:sans-serif;">
+        <h2>📅 Today's Calendar Events</h2>
+        {debug_info}
+        {event_list}
+        <p><a href="/dashboard">Back to Dashboard</a></p>
+    </body>
+    </html>
+    """)
 @app.get("/test")
 def test():
     return {"status": "ok"}
