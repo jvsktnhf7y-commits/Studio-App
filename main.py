@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI
+from calendar_auth import router, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 import os
@@ -102,7 +103,10 @@ else:
     print("❌ GOOGLE_CREDENTIALS environment variable NOT found")
 
 
-app = FastAPI(title="My Music Studio Automation")
+app = FastAPI()
+
+# Include calendar auth router
+app.include_router(router)(title="My Music Studio Automation")
 
 # Create static directory
 os.makedirs("static", exist_ok=True)
