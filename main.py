@@ -7,6 +7,13 @@ from datetime import datetime
 import hashlib
 import json
 
+# Load Google credentials from environment variable (for Render)
+if os.environ.get('GOOGLE_CREDENTIALS') and not os.path.exists('credentials.json'):
+    with open('credentials.json', 'w') as f:
+        f.write(os.environ.get('GOOGLE_CREDENTIALS'))
+    print("✅ Loaded credentials from environment")
+
+
 app = FastAPI(title="Studio App")
 
 # Create static directory
