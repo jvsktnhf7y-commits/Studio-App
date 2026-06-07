@@ -369,6 +369,22 @@ def calendar_events():
     html += "</ul><a href='/dashboard'>Back</a>"
     return HTMLResponse(html)
 
+
+
+@app.get("/debug-env")
+def debug_env():
+    """Check which environment variables are set"""
+    import os
+    return {
+        "TWILIO_ACCOUNT_SID": bool(os.environ.get("TWILIO_ACCOUNT_SID")),
+        "TWILIO_AUTH_TOKEN": bool(os.environ.get("TWILIO_AUTH_TOKEN")),
+        "TWILIO_PHONE_NUMBER": bool(os.environ.get("TWILIO_PHONE_NUMBER")),
+        "SENDGRID_API_KEY": bool(os.environ.get("SENDGRID_API_KEY")),
+        "SENDGRID_FROM_EMAIL": bool(os.environ.get("SENDGRID_FROM_EMAIL")),
+        "GOOGLE_CREDENTIALS": bool(os.environ.get("GOOGLE_CREDENTIALS")),
+    }
+
+
 @app.get("/test")
 def test():
     return {"status": "ok"}
