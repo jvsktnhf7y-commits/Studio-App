@@ -7,4 +7,3 @@ google-api-python-client==2.108.0
 pytz==2023.3
 python-multipart==0.0.6
 
-sendgrid==6.10.0
