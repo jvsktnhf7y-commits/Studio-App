@@ -376,3 +376,87 @@ def test():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+# Email Receipts (SendGrid)
+import os
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
+
+SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY', '')
+SENDGRID_FROM_EMAIL = os.environ.get('SENDGRID_FROM_EMAIL', '')
+
+def send_receipt_email(to_email, student_name, lesson_date, amount_paid):
+    """Send a receipt email after a lesson"""
+    if not SENDGRID_API_KEY:
+        print("SendGrid not configured")
+        return False
+    
+    subject = f"Lesson Receipt - {student_name}"
+    html_content = f"""
+    <h2>🎵 Lesson Receipt</h2>
+    <p><strong>Student:</strong> {student_name}</p>
+    <p><strong>Date:</strong> {lesson_date}</p>
+    <p><strong>Amount Paid:</strong> ${amount_paid:.2f}</p>
+    <p>Thank you for your lesson!</p>
+    """
+    
+    message = Mail(
+        from_email=SENDGRID_FROM_EMAIL,
+        to_emails=to_email,
+        subject=subject,
+        html_content=html_content
+    )
+    
+    try:
+        sg = SendGridAPIClient(SENDGRID_API_KEY)
+        response = sg.send(message)
+        print(f"Email sent: {response.status_code}")
+        return True
+    except Exception as e:
+        print(f"Email error: {e}")
+        return False
+
+@app.post("/send-test-email")
+def send_test_email(email: str = Form(...)):
+    """Test email sending"""
+    result = send_receipt_email(email, "Test Student", "2024-01-01", 50.00)
+    if result:
+        return HTMLResponse("<h2>✅ Test email sent!</h2><a href='/dashboard'>Back</a>")
+    else:
+        return HTMLResponse("<h2>❌ Failed to send email. Check SendGrid settings.</h2><a href='/dashboard'>Back</a>")
+
+@app.get("/email-settings")
+def email_settings():
+    """Email settings page"""
+    return HTMLResponse("""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Email Settings</title>
+        <link rel="stylesheet" href="/static/style.css">
+    </head>
+    <body>
+        <div class="container">
+            <div class="card">
+                <h1>📧 Email Receipts</h1>
+                <p>Send receipts to students after lessons.</p>
+                
+                <h3>Test Email</h3>
+                <form action="/send-test-email" method="post">
+                    <input type="email" name="email" placeholder="student@example.com" required>
+                    <button type="submit" class="btn">Send Test</button>
+                </form>
+                
+                <h3>Setup Instructions</h3>
+                <p>Add these to Render Environment Variables:</p>
+                <ul>
+                    <li><code>SENDGRID_API_KEY</code> - Your SendGrid API key</li>
+                    <li><code>SENDGRID_FROM_EMAIL</code> - Your verified sender email</li>
+                </ul>
+                <a href="/dashboard" class="btn">Back</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    """)
