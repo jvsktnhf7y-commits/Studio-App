@@ -11,6 +11,7 @@ app = FastAPI(title="Studio App")
 
 # Create static directory
 os.makedirs("static", exist_ok=True)
+os.makedirs("/data", exist_ok=True)
 
 # CSS
 css_content = """
@@ -30,13 +31,13 @@ with open("static/style.css", "w") as f:
     f.write(css_content)
 
 # File paths
-LEDGER_FILE = "studio_ledger.csv"
-PROFILES_FILE = "student_profiles.csv"
-PRICING_FILE = "pricing_tiers.csv"
+LEDGER_FILE = "/data/studio_ledger.csv"
+PROFILES_FILE = "/data/student_profiles.csv"
+PRICING_FILE = "/data/pricing_tiers.csv"
 DEFAULT_RATE = 50.00
 
 # Password file
-PASSWORD_FILE = "admin_password.json"
+PASSWORD_FILE = "/data/admin_password.json"
 if not os.path.exists(PASSWORD_FILE):
     default_hash = hashlib.sha256("studio2025".encode()).hexdigest()
     with open(PASSWORD_FILE, 'w') as f:
