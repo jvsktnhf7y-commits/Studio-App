@@ -385,6 +385,156 @@ def debug_env():
     }
 
 
+
+
+# Payment Recording
+@app.get("/payments", response_class=HTMLResponse)
+def payments_page():
+    """Payment recording page"""
+    import csv
+    from datetime import datetime
+    
+    students = get_all_profiles()
+    student_options = ""
+    for name in students.keys():
+        student_options += f'<option value="{name}">{name}</option>'
+    
+    # Get recent payments from ledger
+    recent_payments = ""
+    if os.path.exists(LEDGER_FILE):
+        with open(LEDGER_FILE, 'r') as f:
+            reader = csv.DictReader(f)
+            rows_list = list(reader)
+            for row in rows_list[-10:]:
+                if 'Payment' in row.get('Status', '') or 'payment' in row.get('Notes', '').lower():
+                    recent_payments += f"""
+                    <tr>
+                        <td>{row.get('Date', '')}</td>
+                        <td>{row.get('Student', '')}</td>
+                        <td>${float(row.get('AmountCharged', 0)):.2f}</td>
+                        <td>{row.get('Notes', '')}</td>
+                    </tr>
+                    """
+    
+    # Get student balances
+    balances_rows = ""
+    for name, data in students.items():
+        prepaid = data.get('prepaid', 0)
+        credits = data.get('credits', 0)
+        balances_rows += f"""
+        <tr>
+            <td><strong>{name}</strong></td>
+            <td>{credits}</td>
+            <td>${prepaid:.2f}</td>
+        </tr>
+        """
+    
+    if not balances_rows:
+        balances_rows = '<tr><td colspan="3">No students yet</td></tr>'
+    
+    return HTMLResponse(f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Record Payment</title>
+        <link rel="stylesheet" href="/static/style.css">
+        <style>
+            .form-row {{ display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap; }}
+            .form-group {{ flex: 1; min-width: 150px; }}
+            .payment-card {{ background: #f0fdf4; border: 2px solid #22c55e; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="card payment-card">
+                <h1>💰 Record Payment</h1>
+                <p>Record a payment received from a student (cash, check, Venmo, etc.)</p>
+                <form action="/record-payment" method="post">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Student</label>
+                            <select name="student_name" required>
+                                <option value="">Select Student</option>
+                                {student_options}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Amount ($)</label>
+                            <input type="number" step="0.01" name="amount" placeholder="50.00" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Date</label>
+                            <input type="date" name="payment_date" required>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Payment Method</label>
+                        <select name="payment_method">
+                            <option value="Cash">Cash</option>
+                            <option value="Check">Check</option>
+                            <option value="Venmo">Venmo</option>
+                            <option value="Zelle">Zelle</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Notes (optional)</label>
+                        <input type="text" name="notes" placeholder="e.g., Payment for March lessons">
+                    </div>
+                    <button type="submit" class="btn">💵 Record Payment</button>
+                </form>
+            </div>
+            
+            <div class="card">
+                <h2>📋 Recent Payments</h2>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead><tr><th>Date</th><th>Student</th><th>Amount</th><th>Notes</th></tr></thead>
+                        <tbody>{recent_payments if recent_payments else '<tr><td colspan="4">No payments recorded yet</td></tr>'}</tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>💰 Student Balances</h2>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead><tr><th>Student</th><th>Credits</th><th>Prepaid Balance</th></tr></thead>
+                        <tbody>{balances_rows}</tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <a href="/dashboard" class="btn">← Back</a>
+        </div>
+    </body>
+    </html>
+    """)
+
+@app.post("/record-payment")
+def record_payment(
+    student_name: str = Form(...),
+    amount: float = Form(...),
+    payment_date: str = Form(...),
+    payment_method: str = Form(...),
+    notes: str = Form("")
+):
+    """Record a payment from student"""
+    import csv
+    
+    # Update student prepaid balance
+    profiles_map = get_all_profiles()
+    if student_name in profiles_map:
+        current_prepaid = profiles_map[student_name].get('prepaid', 0)
+        profiles_map[student_name]['prepaid'] = current_prepaid + amount
+        save_all_profiles(profiles_map)
+    
+    # Record in ledger
+    full_notes = f"Payment - {payment_method}. {notes}".strip()
+    with open(LEDGER_FILE, 'a', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([payment_date, student_name, "Payment", f"{amount:.2f}", full_notes])
+    
+    return RedirectResponse(url="/payments", status_code=303)
 @app.get("/test")
 def test():
     return {"status": "ok"}
