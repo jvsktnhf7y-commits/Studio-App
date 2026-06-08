@@ -374,6 +374,12 @@ def payments_page():
     import csv
     from datetime import datetime
     
+    # File constants
+    LEDGER_FILE = "studio_ledger.csv"
+    PROFILES_FILE = "student_profiles.csv"
+    PRICING_FILE = "pricing_tiers.csv"
+    DEFAULT_RATE = 50.00
+    
     students = get_all_profiles()
     student_options = ""
     for name in students.keys():
@@ -500,6 +506,8 @@ def record_payment(
 ):
     """Record a payment from student"""
     import csv
+    
+    LEDGER_FILE = "studio_ledger.csv"
     
     # Update student prepaid balance
     profiles_map = get_all_profiles()
