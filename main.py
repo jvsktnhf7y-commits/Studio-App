@@ -1,12 +1,19 @@
+from fastapi import FastAPI, Form, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+import os
+import csv
+from datetime import datetime
 
-# Create necessary CSV files if they don't exist
 import csv
 import os
 
+# Define file paths
 LEDGER_FILE = "studio_ledger.csv"
 PROFILES_FILE = "student_profiles.csv"
 PRICING_FILE = "pricing_tiers.csv"
 
+# Create files if they don't exist
 if not os.path.exists(PROFILES_FILE):
     with open(PROFILES_FILE, 'w', newline='') as f:
         writer = csv.writer(f)
@@ -25,21 +32,11 @@ if not os.path.exists(LEDGER_FILE):
         writer.writerow(["Date", "Student", "Status", "AmountCharged", "Notes"])
     print("Created studio_ledger.csv")
 
-from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
-import os
-import csv
-from datetime import datetime
 import hashlib
 import json
 import pytz
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-
-
-
-
 
 app = FastAPI(title="Studio App")
 
@@ -404,43 +401,38 @@ def payments_page():
     """Payment recording page"""
     import csv
     from datetime import datetime
+
+import csv
+import os
+
+# Define file paths
+LEDGER_FILE = "studio_ledger.csv"
+PROFILES_FILE = "student_profiles.csv"
+PRICING_FILE = "pricing_tiers.csv"
+
+# Create files if they don't exist
+if not os.path.exists(PROFILES_FILE):
+    with open(PROFILES_FILE, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(["Name", "TierName", "Rate", "TargetMinutes", "Credits", "Description", "Prepaid"])
+    print("Created student_profiles.csv")
+
+if not os.path.exists(PRICING_FILE):
+    with open(PRICING_FILE, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(["TierName", "HourlyRate", "TargetMinutes"])
+    print("Created pricing_tiers.csv")
+
+if not os.path.exists(LEDGER_FILE):
+    with open(LEDGER_FILE, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(["Date", "Student", "Status", "AmountCharged", "Notes"])
+    print("Created studio_ledger.csv")
+
     
     # File constants
     LEDGER_FILE = "studio_ledger.csv"
-
-
-
-# Initialize CSV files with headers if they don't exist
-def init_csv_files():
-    """Ensure all CSV files have proper headers"""
-    import csv
-    import os
-    
-    # Student profiles file
-    if not os.path.exists(PROFILES_FILE) or os.path.getsize(PROFILES_FILE) == 0:
-        with open(PROFILES_FILE, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(["Name", "TierName", "Rate", "TargetMinutes", "Credits", "Description", "Prepaid"])
-        print(f"✅ Created {PROFILES_FILE} with headers")
-    
-    # Pricing tiers file
-    if not os.path.exists(PRICING_FILE) or os.path.getsize(PRICING_FILE) == 0:
-        with open(PRICING_FILE, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(["TierName", "HourlyRate", "TargetMinutes"])
-        print(f"✅ Created {PRICING_FILE} with headers")
-    
-    # Ledger file
-    if not os.path.exists(LEDGER_FILE) or os.path.getsize(LEDGER_FILE) == 0:
-        with open(LEDGER_FILE, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(["Date", "Student", "Status", "AmountCharged", "Notes"])
-        print(f"✅ Created {LEDGER_FILE} with headers")
-
-# Run initialization
-init_csv_files()
-
-PROFILES_FILE = "student_profiles.csv"
+    PROFILES_FILE = "student_profiles.csv"
     PRICING_FILE = "pricing_tiers.csv"
     DEFAULT_RATE = 50.00
     
@@ -575,39 +567,6 @@ def record_payment(
     import os
     
     LEDGER_FILE = "studio_ledger.csv"
-
-
-
-# Initialize CSV files with headers if they don't exist
-def init_csv_files():
-    """Ensure all CSV files have proper headers"""
-    import csv
-    import os
-    
-    # Student profiles file
-    if not os.path.exists(PROFILES_FILE) or os.path.getsize(PROFILES_FILE) == 0:
-        with open(PROFILES_FILE, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(["Name", "TierName", "Rate", "TargetMinutes", "Credits", "Description", "Prepaid"])
-        print(f"✅ Created {PROFILES_FILE} with headers")
-    
-    # Pricing tiers file
-    if not os.path.exists(PRICING_FILE) or os.path.getsize(PRICING_FILE) == 0:
-        with open(PRICING_FILE, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(["TierName", "HourlyRate", "TargetMinutes"])
-        print(f"✅ Created {PRICING_FILE} with headers")
-    
-    # Ledger file
-    if not os.path.exists(LEDGER_FILE) or os.path.getsize(LEDGER_FILE) == 0:
-        with open(LEDGER_FILE, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(["Date", "Student", "Status", "AmountCharged", "Notes"])
-        print(f"✅ Created {LEDGER_FILE} with headers")
-
-# Run initialization
-init_csv_files()
-
     
     # Ensure CSV has headers
     if not os.path.exists(LEDGER_FILE) or os.path.getsize(LEDGER_FILE) == 0:
@@ -788,39 +747,6 @@ def debug_ledger():
     import os
     
     LEDGER_FILE = "studio_ledger.csv"
-
-
-
-# Initialize CSV files with headers if they don't exist
-def init_csv_files():
-    """Ensure all CSV files have proper headers"""
-    import csv
-    import os
-    
-    # Student profiles file
-    if not os.path.exists(PROFILES_FILE) or os.path.getsize(PROFILES_FILE) == 0:
-        with open(PROFILES_FILE, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(["Name", "TierName", "Rate", "TargetMinutes", "Credits", "Description", "Prepaid"])
-        print(f"✅ Created {PROFILES_FILE} with headers")
-    
-    # Pricing tiers file
-    if not os.path.exists(PRICING_FILE) or os.path.getsize(PRICING_FILE) == 0:
-        with open(PRICING_FILE, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(["TierName", "HourlyRate", "TargetMinutes"])
-        print(f"✅ Created {PRICING_FILE} with headers")
-    
-    # Ledger file
-    if not os.path.exists(LEDGER_FILE) or os.path.getsize(LEDGER_FILE) == 0:
-        with open(LEDGER_FILE, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(["Date", "Student", "Status", "AmountCharged", "Notes"])
-        print(f"✅ Created {LEDGER_FILE} with headers")
-
-# Run initialization
-init_csv_files()
-
     
     if not os.path.exists(LEDGER_FILE):
         return {"exists": False, "message": "Ledger file not found"}
@@ -835,29 +761,4 @@ init_csv_files()
         "exists": True,
         "total_entries": len(entries),
         "last_5_entries": entries[-5:] if entries else []
-    }
-
-
-@app.get("/debug-students")
-def debug_students():
-    """Debug endpoint to check student profiles"""
-    import csv
-    import os
-    
-PROFILES_FILE = "student_profiles.csv"
-    
-    if not os.path.exists(PROFILES_FILE):
-        return {"exists": False, "message": "Student profiles file not found"}
-    
-    students = []
-    with open(PROFILES_FILE, 'r') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            students.append(row)
-    
-    return {
-        "exists": True,
-        "file_path": PROFILES_FILE,
-        "total_students": len(students),
-        "students": students
     }
