@@ -474,3 +474,63 @@ def email_settings():
     </html>
     """)
 
+
+# SMS Settings Page
+@app.get("/sms-settings")
+def sms_settings():
+    """SMS settings page"""
+    return HTMLResponse("""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>SMS Settings</title>
+        <link rel="stylesheet" href="/static/style.css">
+    </head>
+    <body>
+        <div class="container">
+            <div class="card">
+                <h1>📱 SMS Reminders</h1>
+                <p>Send text reminders to students before their lessons.</p>
+                
+                <h3>Test SMS</h3>
+                <form action="/send-test-sms" method="post">
+                    <input type="tel" name="phone" placeholder="+1234567890" required>
+                    <button type="submit" class="btn">Send Test</button>
+                </form>
+                
+                <h3>Status</h3>
+                <p>✅ Twilio is ready. Enter your phone number above to test.</p>
+                <a href="/dashboard" class="btn">Back</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    """)
+
+@app.post("/send-test-sms")
+def send_test_sms(phone: str = Form(...)):
+    """Send a test SMS via Twilio"""
+    from twilio.rest import Client
+    import os
+    
+    TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID')
+    TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN')
+    TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER')
+    
+    if not TWILIO_ACCOUNT_SID:
+        return HTMLResponse("<h2>❌ Twilio not configured. Missing Account SID.</h2><a href='/dashboard'>Back</a>")
+    
+    try:
+        client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        message = client.messages.create(
+            body="🎵 Test from Studio App! Your SMS is working.",
+            from_=TWILIO_PHONE_NUMBER,
+            to=phone
+        )
+        return HTMLResponse(f"""
+        <h2>✅ Test SMS Sent!</h2>
+        <p>Message ID: {message.sid}</p>
+        <a href="/dashboard">Back</a>
+        """)
+    except Exception as e:
+        return HTMLResponse(f"<h2>❌ Error: {str(e)}</h2><a href='/dashboard'>Back</a>")
