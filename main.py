@@ -12,6 +12,7 @@ app = FastAPI(title="Studio App")
 # Create static directory
 os.makedirs("static", exist_ok=True)
 os.makedirs("/data", exist_ok=True)
+os.makedirs("/data", exist_ok=True)
 
 # CSS
 css_content = """
