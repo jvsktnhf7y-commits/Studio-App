@@ -120,6 +120,10 @@ def dashboard():
                     <div style="font-size: 48px;">📅</div>
                     <h3>Schedule</h3>
                 </a>
+                <a href="/revenue" class="card" style="text-align: center; text-decoration: none; color: #333;">
+                    <div style="font-size: 48px;">📊</div>
+                    <h3>Revenue</h3>
+                </a>
                 <a href="/logout" class="card" style="text-align: center; text-decoration: none; color: #333;">
                     <div style="font-size: 48px;">🚪</div>
                     <h3>Logout</h3>
@@ -300,7 +304,53 @@ def record_payment(student_name: str = Form(...), amount: float = Form(...), pay
 @app.get("/test")
 def test():
     return {"status": "ok"}
+@app.get("/revenue")
+def revenue_page():
+    """Display total revenue page"""
+    total = calculate_total_revenue()
+    return HTMLResponse(f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Revenue Report</title>
+        <link rel="stylesheet" href="/static/style.css">
+    </head>
+    <body>
+        <div class="container">
+            <div class="card" style="text-align: center;">
+                <h1>💰 Total Revenue</h1>
+                <p style="font-size: 48px; color: #22c55e; font-weight: bold;">${total:.2f}</p>
+                <p>From all recorded payments</p>
+                <a href="/dashboard" class="btn">← Back to Dashboard</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    """)
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+# function to calculate total revenue from all payments
+def calculate_total_revenue():
+    total_revenue = 0
+    if os.path.exists(LEDGER_FILE):
+        with open(LEDGER_FILE, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                amount = float(row.get("Amount", 0))
+                total_revenue += amount
+    return total_revenue
+
+# function to calculate total payments for a student
+def calculate_student_payments(student_name: str):
+    total_payments = 0
+    if os.path.exists(LEDGER_FILE):
+        with open(LEDGER_FILE, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if row.get("Student Name", "").strip() == student_name.strip():
+                    amount = float(row.get("Amount", 0))
+                    total_payments += amount
+    return total_payments
+
