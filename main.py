@@ -38,6 +38,33 @@ import pytz
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
+
+# Initialize CSV files on startup
+import csv
+import os
+
+LEDGER_FILE = "studio_ledger.csv"
+PROFILES_FILE = "student_profiles.csv"
+PRICING_FILE = "pricing_tiers.csv"
+
+if not os.path.exists(PROFILES_FILE):
+    with open(PROFILES_FILE, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Name", "TierName", "Rate", "TargetMinutes", "Credits", "Description", "Prepaid"])
+    print("Created student_profiles.csv")
+
+if not os.path.exists(PRICING_FILE):
+    with open(PRICING_FILE, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["TierName", "HourlyRate", "TargetMinutes"])
+    print("Created pricing_tiers.csv")
+
+if not os.path.exists(LEDGER_FILE):
+    with open(LEDGER_FILE, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Date", "Student", "Status", "AmountCharged", "Notes"])
+    print("Created studio_ledger.csv")
+
 app = FastAPI(title="Studio App")
 
 # Create static directory
