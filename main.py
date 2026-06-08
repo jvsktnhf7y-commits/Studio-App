@@ -92,39 +92,45 @@ def save_pricing_tiers(tiers_map):
 # Dashboard with Calendar
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard():
-    return HTMLResponse(f"""
+    """Main dashboard page"""
+    return HTMLResponse("""
     <!DOCTYPE html>
     <html>
-    <head><title>Studio Dashboard</title><link rel="stylesheet" href="/static/style.css"></head>
+    <head>
+        <title>Studio Dashboard</title>
+        <link rel="stylesheet" href="/static/style.css">
+    </head>
     <body>
         <div class="container">
             <div class="card" style="text-align: center;">
                 <h1>🎵 Studio Console</h1>
                 <p>Welcome to your music studio management system</p>
             </div>
-            {calendar_html}
             <div class="grid">
                 <a href="/students" class="card" style="text-align: center; text-decoration: none; color: #333;">
                     <div style="font-size: 48px;">👥</div>
                     <h3>Students</h3>
+                    <small>Manage profiles</small>
                 </a>
                 <a href="/rates" class="card" style="text-align: center; text-decoration: none; color: #333;">
                     <div style="font-size: 48px;">💰</div>
                     <h3>Rates</h3>
+                    <small>Pricing tiers</small>
                 </a>
                 <a href="/payments" class="card" style="text-align: center; text-decoration: none; color: #333;">
-                    <div style="font-size: 48px;">💰</div>
+                    <div style="font-size: 48px;">💵</div>
                     <h3>Payments</h3>
                     <small>Record payments</small>
                 </a>
-                
                 <a href="/schedule" class="card" style="text-align: center; text-decoration: none; color: #333;">
                     <div style="font-size: 48px;">📅</div>
                     <h3>Schedule</h3>
+                    <small>Book lessons</small>
                 </a>
                 <a href="/logout" class="card" style="text-align: center; text-decoration: none; color: #333;">
                     <div style="font-size: 48px;">🚪</div>
                     <h3>Logout</h3>
+                    <small>End session</small>
                 </a>
             </div>
         </div>
