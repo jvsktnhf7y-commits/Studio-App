@@ -92,38 +92,6 @@ def save_pricing_tiers(tiers_map):
 # Dashboard with Calendar
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard():
-    calendar_html = ""
-    if os.path.exists('calendar_token.json'):
-        try:
-            with open('calendar_token.json', 'r') as f:
-                token_data = json.load(f)
-            creds = Credentials.from_authorized_user_info(token_data)
-            service = build('calendar', 'v3', credentials=creds)
-            tz = pytz.timezone('America/New_York')
-            now = datetime.now(tz)
-            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            end = now.replace(hour=23, minute=59, second=59, microsecond=0)
-            start_utc = start.astimezone(pytz.UTC).isoformat()
-            end_utc = end.astimezone(pytz.UTC).isoformat()
-            events = service.events().list(calendarId='primary', timeMin=start_utc, timeMax=end_utc, singleEvents=True).execute().get('items', [])
-            if events:
-                calendar_html = '<div class="card"><h2>📅 Today\'s Lessons</h2><ul style="list-style:none; padding:0;">'
-                for e in events:
-                    summary = e.get('summary', 'Lesson')
-                    start_time = e.get('start', {}).get('dateTime', 'All day')
-                    if start_time and 'T' in start_time:
-                        dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-                        local_dt = dt.astimezone(tz)
-                        start_time = local_dt.strftime('%I:%M %p')
-                    calendar_html += f'<li style="padding:8px 0; border-bottom:1px solid #eee;">🎵 <strong>{summary}</strong> at {start_time}</li>'
-                calendar_html += '</ul></div>'
-            else:
-                calendar_html = '<div class="card"><h2>📅 Today\'s Lessons</h2><p>No lessons scheduled today.</p><a href="/schedule" class="btn">Schedule</a></div>'
-        except Exception as e:
-            calendar_html = f'<div class="card"><h2>📅 Calendar</h2><p><a href="/calendar-auth">Connect Calendar</a></p><p style="color:#999;font-size:12px;">Error: {str(e)[:50]}</p></div>'
-    else:
-        calendar_html = '<div class="card"><h2>📅 Google Calendar</h2><p><a href="/calendar-auth">Connect Calendar</a> to see your lessons.</p></div>'
-    
     return HTMLResponse(f"""
     <!DOCTYPE html>
     <html>
