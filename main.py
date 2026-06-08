@@ -440,7 +440,7 @@ def init_csv_files():
 # Run initialization
 init_csv_files()
 
-    PROFILES_FILE = "student_profiles.csv"
+PROFILES_FILE = "student_profiles.csv"
     PRICING_FILE = "pricing_tiers.csv"
     DEFAULT_RATE = 50.00
     
@@ -844,7 +844,7 @@ def debug_students():
     import csv
     import os
     
-    PROFILES_FILE = "student_profiles.csv"
+PROFILES_FILE = "student_profiles.csv"
     
     if not os.path.exists(PROFILES_FILE):
         return {"exists": False, "message": "Student profiles file not found"}
