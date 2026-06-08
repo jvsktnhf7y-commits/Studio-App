@@ -496,6 +496,7 @@ def payments_page():
     </html>
     """)
 
+
 @app.post("/record-payment")
 def record_payment(
     student_name: str = Form(...),
@@ -506,8 +507,15 @@ def record_payment(
 ):
     """Record a payment from student"""
     import csv
+    import os
     
     LEDGER_FILE = "studio_ledger.csv"
+    
+    # Ensure CSV has headers
+    if not os.path.exists(LEDGER_FILE) or os.path.getsize(LEDGER_FILE) == 0:
+        with open(LEDGER_FILE, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(["Date", "Student", "Status", "AmountCharged", "Notes"])
     
     # Update student prepaid balance
     profiles_map = get_all_profiles()
@@ -522,7 +530,8 @@ def record_payment(
         writer = csv.writer(f)
         writer.writerow([payment_date, student_name, "Payment", f"{amount:.2f}", full_notes])
     
-    return RedirectResponse(url="/payments", status_code=303)
+    return RedirectResponse(url="/payments?success=Payment recorded", status_code=303)
+
 @app.get("/test")
 def test():
     return {"status": "ok"}
