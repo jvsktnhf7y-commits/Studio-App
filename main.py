@@ -681,3 +681,27 @@ def send_test_sms(phone: str = Form(...)):
         """)
     except Exception as e:
         return HTMLResponse(f"<h2>❌ Error: {str(e)}</h2><a href='/dashboard'>Back</a>")
+
+
+@app.get("/debug-ledger")
+def debug_ledger():
+    """Debug endpoint to view recent ledger entries"""
+    import csv
+    import os
+    
+    LEDGER_FILE = "studio_ledger.csv"
+    
+    if not os.path.exists(LEDGER_FILE):
+        return {"exists": False, "message": "Ledger file not found"}
+    
+    entries = []
+    with open(LEDGER_FILE, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            entries.append(row)
+    
+    return {
+        "exists": True,
+        "total_entries": len(entries),
+        "last_5_entries": entries[-5:] if entries else []
+    }
