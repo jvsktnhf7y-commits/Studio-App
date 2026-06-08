@@ -144,6 +144,12 @@ def dashboard():
                     <div style="font-size: 48px;">💰</div>
                     <h3>Rates</h3>
                 </a>
+                <a href="/payments" class="card" style="text-align: center; text-decoration: none; color: #333;">
+                    <div style="font-size: 48px;">💰</div>
+                    <h3>Payments</h3>
+                    <small>Record payments</small>
+                </a>
+                
                 <a href="/schedule" class="card" style="text-align: center; text-decoration: none; color: #333;">
                     <div style="font-size: 48px;">📅</div>
                     <h3>Schedule</h3>
