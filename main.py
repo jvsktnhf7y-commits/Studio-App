@@ -392,7 +392,8 @@ def payments_page():
             reader = csv.DictReader(f)
             rows_list = list(reader)
             for row in rows_list[-10:]:
-                if 'Payment' in row.get('Status', '') or 'payment' in row.get('Notes', '').lower():
+                # Show ALL payment entries (where Status is "Payment" or amount > 0)
+                if row.get('Status', '') == 'Payment' or float(row.get('AmountCharged', 0)) > 0:
                     recent_payments += f"""
                     <tr>
                         <td>{row.get('Date', '')}</td>
