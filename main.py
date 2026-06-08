@@ -4,66 +4,8 @@ from fastapi.staticfiles import StaticFiles
 import os
 import csv
 from datetime import datetime
-
-import csv
-import os
-
-# Define file paths
-LEDGER_FILE = "studio_ledger.csv"
-PROFILES_FILE = "student_profiles.csv"
-PRICING_FILE = "pricing_tiers.csv"
-
-# Create files if they don't exist
-if not os.path.exists(PROFILES_FILE):
-    with open(PROFILES_FILE, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(["Name", "TierName", "Rate", "TargetMinutes", "Credits", "Description", "Prepaid"])
-    print("Created student_profiles.csv")
-
-if not os.path.exists(PRICING_FILE):
-    with open(PRICING_FILE, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(["TierName", "HourlyRate", "TargetMinutes"])
-    print("Created pricing_tiers.csv")
-
-if not os.path.exists(LEDGER_FILE):
-    with open(LEDGER_FILE, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(["Date", "Student", "Status", "AmountCharged", "Notes"])
-    print("Created studio_ledger.csv")
-
 import hashlib
 import json
-import pytz
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-
-
-# Initialize CSV files on startup
-import csv
-import os
-
-LEDGER_FILE = "studio_ledger.csv"
-PROFILES_FILE = "student_profiles.csv"
-PRICING_FILE = "pricing_tiers.csv"
-
-if not os.path.exists(PROFILES_FILE):
-    with open(PROFILES_FILE, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["Name", "TierName", "Rate", "TargetMinutes", "Credits", "Description", "Prepaid"])
-    print("Created student_profiles.csv")
-
-if not os.path.exists(PRICING_FILE):
-    with open(PRICING_FILE, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["TierName", "HourlyRate", "TargetMinutes"])
-    print("Created pricing_tiers.csv")
-
-if not os.path.exists(LEDGER_FILE):
-    with open(LEDGER_FILE, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["Date", "Student", "Status", "AmountCharged", "Notes"])
-    print("Created studio_ledger.csv")
 
 app = FastAPI(title="Studio App")
 
@@ -87,17 +29,18 @@ input, select { width: 100%; padding: 10px; margin: 5px 0; border: 2px solid #e5
 with open("static/style.css", "w") as f:
     f.write(css_content)
 
+# File paths
+LEDGER_FILE = "studio_ledger.csv"
+PROFILES_FILE = "student_profiles.csv"
+PRICING_FILE = "pricing_tiers.csv"
+DEFAULT_RATE = 50.00
+
 # Password file
 PASSWORD_FILE = "admin_password.json"
 if not os.path.exists(PASSWORD_FILE):
     default_hash = hashlib.sha256("studio2025".encode()).hexdigest()
     with open(PASSWORD_FILE, 'w') as f:
         json.dump({"password_hash": default_hash}, f)
-
-# Data files
-PROFILES_FILE = "student_profiles.csv"
-PRICING_FILE = "pricing_tiers.csv"
-DEFAULT_RATE = 50.00
 
 def get_all_profiles():
     profiles = {}
@@ -112,16 +55,17 @@ def get_all_profiles():
                         "rate": float(row.get("Rate", DEFAULT_RATE)),
                         "target_minutes": int(row.get("TargetMinutes", 60)),
                         "credits": int(row.get("Credits", 0)),
-                        "description": row.get("Description", "")
+                        "description": row.get("Description", ""),
+                        "prepaid": float(row.get("Prepaid", 0))
                     }
     return profiles
 
 def save_all_profiles(profiles_map):
     with open(PROFILES_FILE, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(["Name", "TierName", "Rate", "TargetMinutes", "Credits", "Description"])
+        writer.writerow(["Name", "TierName", "Rate", "TargetMinutes", "Credits", "Description", "Prepaid"])
         for name, data in profiles_map.items():
-            writer.writerow([name, data['tier_name'], data['rate'], data['target_minutes'], data['credits'], data['description']])
+            writer.writerow([name, data.get('tier_name', ''), data.get('rate', DEFAULT_RATE), data.get('target_minutes', 60), data.get('credits', 0), data.get('description', ''), data.get('prepaid', 0)])
 
 def get_pricing_tiers():
     tiers = {}
@@ -144,17 +88,13 @@ def save_pricing_tiers(tiers_map):
         for name, data in tiers_map.items():
             writer.writerow([name, data['rate'], data['minutes']])
 
-# Dashboard with Calendar
+# Dashboard
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard():
-    """Main dashboard page"""
     return HTMLResponse("""
     <!DOCTYPE html>
     <html>
-    <head>
-        <title>Studio Dashboard</title>
-        <link rel="stylesheet" href="/static/style.css">
-    </head>
+    <head><title>Studio Dashboard</title><link rel="stylesheet" href="/static/style.css"></head>
     <body>
         <div class="container">
             <div class="card" style="text-align: center;">
@@ -165,27 +105,22 @@ def dashboard():
                 <a href="/students" class="card" style="text-align: center; text-decoration: none; color: #333;">
                     <div style="font-size: 48px;">👥</div>
                     <h3>Students</h3>
-                    <small>Manage profiles</small>
                 </a>
                 <a href="/rates" class="card" style="text-align: center; text-decoration: none; color: #333;">
                     <div style="font-size: 48px;">💰</div>
                     <h3>Rates</h3>
-                    <small>Pricing tiers</small>
                 </a>
                 <a href="/payments" class="card" style="text-align: center; text-decoration: none; color: #333;">
                     <div style="font-size: 48px;">💵</div>
                     <h3>Payments</h3>
-                    <small>Record payments</small>
                 </a>
                 <a href="/schedule" class="card" style="text-align: center; text-decoration: none; color: #333;">
                     <div style="font-size: 48px;">📅</div>
                     <h3>Schedule</h3>
-                    <small>Book lessons</small>
                 </a>
                 <a href="/logout" class="card" style="text-align: center; text-decoration: none; color: #333;">
                     <div style="font-size: 48px;">🚪</div>
                     <h3>Logout</h3>
-                    <small>End session</small>
                 </a>
             </div>
         </div>
@@ -249,6 +184,7 @@ async def auth_middleware(request: Request, call_next):
         return await call_next(request)
     return RedirectResponse(url="/login", status_code=303)
 
+# Students page
 @app.get("/students", response_class=HTMLResponse)
 def students_page():
     profiles = get_all_profiles()
@@ -270,7 +206,7 @@ def students_page():
 @app.post("/add-profile")
 def add_profile(name: str = Form(...), rate_tier_name: str = Form(...), description: str = Form(...)):
     profiles = get_all_profiles()
-    profiles[name] = {"tier_name": rate_tier_name, "rate": DEFAULT_RATE, "target_minutes": 60, "credits": 0, "description": description}
+    profiles[name] = {"tier_name": rate_tier_name, "rate": DEFAULT_RATE, "target_minutes": 60, "credits": 0, "description": description, "prepaid": 0}
     save_all_profiles(profiles)
     return RedirectResponse(url="/students", status_code=303)
 
@@ -320,301 +256,44 @@ def schedule_page():
 def create_lesson(student_name: str = Form(...), date: str = Form(...), time: str = Form(...), duration: int = Form(60)):
     return HTMLResponse(f"""<!DOCTYPE html><html><head><title>Lesson Created</title><link rel="stylesheet" href="/static/style.css"></head><body><div class="container"><div class="card" style="text-align:center;"><h1>✅ Lesson Created!</h1><p><strong>{student_name}</strong> on {date} at {time} for {duration} minutes</p><a href="/schedule" class="btn">Schedule Another</a><a href="/dashboard" class="btn">Dashboard</a></div></div></body></html>""")
 
-# Google Calendar endpoints
-@app.get("/calendar-auth")
-def calendar_auth():
-    from google_auth_oauthlib.flow import Flow
-    from fastapi.responses import RedirectResponse, HTMLResponse
-    import json
-    import os
-    
-    creds_json = os.environ.get('GOOGLE_CREDENTIALS', '')
-    if not creds_json:
-        return HTMLResponse("<h2>❌ GOOGLE_CREDENTIALS not set</h2>")
-    
-    try:
-        client_config = json.loads(creds_json)
-        if 'web' not in client_config:
-            client_config = {"web": client_config}
-        
-        flow = Flow.from_client_config(
-            client_config,
-            scopes=['https://www.googleapis.com/auth/calendar.readonly'],
-            redirect_uri='https://studio-app-7y7z.onrender.com/calendar-callback'
-        )
-        auth_url, _ = flow.authorization_url(access_type='offline', prompt='consent')
-        return RedirectResponse(auth_url)
-    except Exception as e:
-        return HTMLResponse(f"<h2>Error: {str(e)}</h2><a href='/dashboard'>Back</a>")
-
-@app.get("/calendar-callback")
-def calendar_callback(code: str = None):
-    from google_auth_oauthlib.flow import Flow
-    from fastapi.responses import HTMLResponse
-    import json
-    import os
-    
-    creds_json = os.environ.get('GOOGLE_CREDENTIALS', '')
-    client_config = json.loads(creds_json)
-    if 'web' not in client_config:
-        client_config = {"web": client_config}
-    
-    flow = Flow.from_client_config(
-        client_config,
-        scopes=['https://www.googleapis.com/auth/calendar.readonly'],
-        redirect_uri='https://studio-app-7y7z.onrender.com/calendar-callback'
-    )
-    flow.fetch_token(code=code)
-    
-    token_data = flow.credentials.to_json()
-    with open('calendar_token.json', 'w') as f:
-        f.write(token_data)
-    
-    return HTMLResponse("<h2>✅ Calendar Connected!</h2><a href='/dashboard'>Back</a>")
-
-@app.get("/calendar-events")
-def calendar_events():
-    if not os.path.exists('calendar_token.json'):
-        return HTMLResponse("<h2>Calendar not connected. <a href='/calendar-auth'>Connect here</a></h2>")
-    
-    with open('calendar_token.json', 'r') as f:
-        token_data = json.load(f)
-    
-    creds = Credentials.from_authorized_user_info(token_data)
-    service = build('calendar', 'v3', credentials=creds)
-    
-    tz = pytz.timezone('America/New_York')
-    now = datetime.now(tz)
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    end = now.replace(hour=23, minute=59, second=59, microsecond=0)
-    
-    start_utc = start.astimezone(pytz.UTC).isoformat()
-    end_utc = end.astimezone(pytz.UTC).isoformat()
-    
-    events = service.events().list(calendarId='primary', timeMin=start_utc, timeMax=end_utc, singleEvents=True).execute().get('items', [])
-    
-    if not events:
-        return HTMLResponse("<h2>No events today</h2><a href='/dashboard'>Back</a>")
-    
-    html = "<h2>Today's Events</h2><ul>"
-    for e in events:
-        summary = e.get('summary', 'Untitled')
-        start_time = e.get('start', {}).get('dateTime', 'All day')
-        html += f"<li>{summary} at {start_time}</li>"
-    html += "</ul><a href='/dashboard'>Back</a>"
-    return HTMLResponse(html)
-
-
-
-@app.get("/debug-env")
-def debug_env():
-    """Check which environment variables are set"""
-    import os
-    return {
-        "TWILIO_ACCOUNT_SID": bool(os.environ.get("TWILIO_ACCOUNT_SID")),
-        "TWILIO_AUTH_TOKEN": bool(os.environ.get("TWILIO_AUTH_TOKEN")),
-        "TWILIO_PHONE_NUMBER": bool(os.environ.get("TWILIO_PHONE_NUMBER")),
-        "SENDGRID_API_KEY": bool(os.environ.get("SENDGRID_API_KEY")),
-        "SENDGRID_FROM_EMAIL": bool(os.environ.get("SENDGRID_FROM_EMAIL")),
-        "GOOGLE_CREDENTIALS": bool(os.environ.get("GOOGLE_CREDENTIALS")),
-    }
-
-
-
-
-# Payment Recording
 @app.get("/payments", response_class=HTMLResponse)
 def payments_page():
-    """Payment recording page"""
-    import csv
-    from datetime import datetime
-
-import csv
-import os
-
-# Define file paths
-LEDGER_FILE = "studio_ledger.csv"
-PROFILES_FILE = "student_profiles.csv"
-PRICING_FILE = "pricing_tiers.csv"
-
-# Create files if they don't exist
-if not os.path.exists(PROFILES_FILE):
-    with open(PROFILES_FILE, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(["Name", "TierName", "Rate", "TargetMinutes", "Credits", "Description", "Prepaid"])
-    print("Created student_profiles.csv")
-
-if not os.path.exists(PRICING_FILE):
-    with open(PRICING_FILE, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(["TierName", "HourlyRate", "TargetMinutes"])
-    print("Created pricing_tiers.csv")
-
-if not os.path.exists(LEDGER_FILE):
-    with open(LEDGER_FILE, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(["Date", "Student", "Status", "AmountCharged", "Notes"])
-    print("Created studio_ledger.csv")
-
-    
-    # File constants
-    LEDGER_FILE = "studio_ledger.csv"
-    PROFILES_FILE = "student_profiles.csv"
-    PRICING_FILE = "pricing_tiers.csv"
-    DEFAULT_RATE = 50.00
-    
-    students = get_all_profiles()
+    profiles = get_all_profiles()
     student_options = ""
-    for name in students.keys():
+    for name in profiles.keys():
         student_options += f'<option value="{name}">{name}</option>'
-    
-    # Get recent payments from ledger
-    recent_payments = ""
-    if os.path.exists(LEDGER_FILE):
-        with open(LEDGER_FILE, 'r') as f:
-            reader = csv.DictReader(f)
-            rows_list = list(reader)
-            for row in rows_list[-10:]:
-                # Show ALL payment entries (where Status is "Payment" or amount > 0)
-                if row.get('Status', '') == 'Payment' or float(row.get('AmountCharged', 0)) > 0:
-                    recent_payments += f"""
-                    <tr>
-                        <td>{row.get('Date', '')}</td>
-                        <td>{row.get('Student', '')}</td>
-                        <td>${float(row.get('AmountCharged', 0)):.2f}</td>
-                        <td>{row.get('Notes', '')}</td>
-                    </tr>
-                    """
-    
-    # Get student balances
-    balances_rows = ""
-    for name, data in students.items():
-        prepaid = data.get('prepaid', 0)
-        credits = data.get('credits', 0)
-        balances_rows += f"""
-        <tr>
-            <td><strong>{name}</strong></td>
-            <td>{credits}</td>
-            <td>${prepaid:.2f}</td>
-        </tr>
-        """
-    
-    if not balances_rows:
-        balances_rows = '<tr><td colspan="3">No students yet</td></tr>'
     
     return HTMLResponse(f"""
     <!DOCTYPE html>
     <html>
-    <head>
-        <title>Record Payment</title>
-        <link rel="stylesheet" href="/static/style.css">
-        <style>
-            .form-row {{ display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap; }}
-            .form-group {{ flex: 1; min-width: 150px; }}
-            .payment-card {{ background: #f0fdf4; border: 2px solid #22c55e; }}
-        </style>
-    </head>
+    <head><title>Record Payment</title><link rel="stylesheet" href="/static/style.css"></head>
     <body>
         <div class="container">
-            <div class="card payment-card">
+            <div class="card">
                 <h1>💰 Record Payment</h1>
-                <p>Record a payment received from a student (cash, check, Venmo, etc.)</p>
                 <form action="/record-payment" method="post">
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Student</label>
-                            <select name="student_name" required>
-                                <option value="">Select Student</option>
-                                {student_options}
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>Amount ($)</label>
-                            <input type="number" step="0.01" name="amount" placeholder="50.00" required>
-                        </div>
-                        <div class="form-group">
-                            <label>Date</label>
-                            <input type="date" name="payment_date" required>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label>Payment Method</label>
-                        <select name="payment_method">
-                            <option value="Cash">Cash</option>
-                            <option value="Check">Check</option>
-                            <option value="Venmo">Venmo</option>
-                            <option value="Zelle">Zelle</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Notes (optional)</label>
-                        <input type="text" name="notes" placeholder="e.g., Payment for March lessons">
-                    </div>
-                    <button type="submit" class="btn">💵 Record Payment</button>
+                    <select name="student_name" required><option value="">Select Student</option>{student_options}</select>
+                    <input type="number" step="0.01" name="amount" placeholder="Amount ($)" required>
+                    <input type="date" name="payment_date" required>
+                    <select name="payment_method"><option value="Cash">Cash</option><option value="Check">Check</option><option value="Venmo">Venmo</option><option value="Zelle">Zelle</option></select>
+                    <input type="text" name="notes" placeholder="Notes (optional)">
+                    <button type="submit" class="btn">Record Payment</button>
                 </form>
             </div>
-            
-            <div class="card">
-                <h2>📋 Recent Payments</h2>
-                <div style="overflow-x: auto;">
-                    <table>
-                        <thead><tr><th>Date</th><th>Student</th><th>Amount</th><th>Notes</th></tr></thead>
-                        <tbody>{recent_payments if recent_payments else '<tr><td colspan="4">No payments recorded yet</td></tr>'}</tbody>
-                    </table>
-                </div>
-            </div>
-            
-            <div class="card">
-                <h2>💰 Student Balances</h2>
-                <div style="overflow-x: auto;">
-                    <table>
-                        <thead><tr><th>Student</th><th>Credits</th><th>Prepaid Balance</th></tr></thead>
-                        <tbody>{balances_rows}</tbody>
-                    </table>
-                </div>
-            </div>
-            
             <a href="/dashboard" class="btn">← Back</a>
         </div>
     </body>
     </html>
     """)
 
-
 @app.post("/record-payment")
-def record_payment(
-    student_name: str = Form(...),
-    amount: float = Form(...),
-    payment_date: str = Form(...),
-    payment_method: str = Form(...),
-    notes: str = Form("")
-):
-    """Record a payment from student"""
-    import csv
-    import os
-    
-    LEDGER_FILE = "studio_ledger.csv"
-    
-    # Ensure CSV has headers
-    if not os.path.exists(LEDGER_FILE) or os.path.getsize(LEDGER_FILE) == 0:
-        with open(LEDGER_FILE, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(["Date", "Student", "Status", "AmountCharged", "Notes"])
-    
-    # Update student prepaid balance
-    profiles_map = get_all_profiles()
-    if student_name in profiles_map:
-        current_prepaid = profiles_map[student_name].get('prepaid', 0)
-        profiles_map[student_name]['prepaid'] = current_prepaid + amount
-        save_all_profiles(profiles_map)
-    
-    # Record in ledger
-    full_notes = f"Payment - {payment_method}. {notes}".strip()
-    with open(LEDGER_FILE, 'a', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow([payment_date, student_name, "Payment", f"{amount:.2f}", full_notes])
-    
-    return RedirectResponse(url="/payments?success=Payment recorded", status_code=303)
+def record_payment(student_name: str = Form(...), amount: float = Form(...), payment_date: str = Form(...), payment_method: str = Form(...), notes: str = Form("")):
+    profiles = get_all_profiles()
+    if student_name in profiles:
+        current_prepaid = profiles[student_name].get('prepaid', 0)
+        profiles[student_name]['prepaid'] = current_prepaid + amount
+        save_all_profiles(profiles)
+    return RedirectResponse(url="/payments", status_code=303)
 
 @app.get("/test")
 def test():
@@ -623,169 +302,3 @@ def test():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
-
-
-
-# Twilio Email (no verification needed!)
-from twilio.rest import Client
-import os
-
-TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID', '')
-TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN', '')
-
-def send_receipt_email(to_email, student_name, lesson_date, amount_paid):
-    """Send receipt using Twilio's email (no verification)"""
-    if not TWILIO_ACCOUNT_SID:
-        print("Twilio not configured")
-        return False
-    
-    try:
-        client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-        
-        # Twilio's email sends from their domain
-        message = client.messages.create(
-            from_='notifications@twilio.com',  # Twilio's verified domain
-            to=to_email,
-            subject=f"Lesson Receipt - {student_name}",
-            body=f"""
-🎵 LESSON RECEIPT
-
-Student: {student_name}
-Date: {lesson_date}
-Amount Paid: ${amount_paid:.2f}
-
-Thank you for your lesson!
-            """.strip()
-        )
-        print(f"Email sent: {message.sid}")
-        return True
-    except Exception as e:
-        print(f"Email error: {e}")
-        return False
-
-@app.post("/send-test-email")
-def send_test_email(email: str = Form(...)):
-    """Test email sending via Twilio"""
-    result = send_receipt_email(email, "Test Student", "2024-01-01", 50.00)
-    if result:
-        return HTMLResponse("<h2>✅ Test email sent via Twilio!</h2><a href='/dashboard'>Back</a>")
-    else:
-        return HTMLResponse("<h2>❌ Failed to send email. Check Twilio settings.</h2><a href='/dashboard'>Back</a>")
-
-@app.get("/email-settings")
-def email_settings():
-    """Email settings page"""
-    return HTMLResponse("""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Email Settings</title>
-        <link rel="stylesheet" href="/static/style.css">
-    </head>
-    <body>
-        <div class="container">
-            <div class="card">
-                <h1>📧 Email Receipts (Twilio)</h1>
-                <p>Send receipts to students after lessons.</p>
-                
-                <h3>Test Email</h3>
-                <form action="/send-test-email" method="post">
-                    <input type="email" name="email" placeholder="student@example.com" required>
-                    <button type="submit" class="btn">Send Test</button>
-                </form>
-                
-                <h3>Setup Complete</h3>
-                <p>✅ Twilio email is ready to use! No verification needed.</p>
-                <p>Emails will come from: <code>notifications@twilio.com</code></p>
-                <a href="/dashboard" class="btn">Back</a>
-            </div>
-        </div>
-    </body>
-    </html>
-    """)
-
-
-# SMS Settings Page
-@app.get("/sms-settings")
-def sms_settings():
-    """SMS settings page"""
-    return HTMLResponse("""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>SMS Settings</title>
-        <link rel="stylesheet" href="/static/style.css">
-    </head>
-    <body>
-        <div class="container">
-            <div class="card">
-                <h1>📱 SMS Reminders</h1>
-                <p>Send text reminders to students before their lessons.</p>
-                
-                <h3>Test SMS</h3>
-                <form action="/send-test-sms" method="post">
-                    <input type="tel" name="phone" placeholder="+1234567890" required>
-                    <button type="submit" class="btn">Send Test</button>
-                </form>
-                
-                <h3>Status</h3>
-                <p>✅ Twilio is ready. Enter your phone number above to test.</p>
-                <a href="/dashboard" class="btn">Back</a>
-            </div>
-        </div>
-    </body>
-    </html>
-    """)
-
-@app.post("/send-test-sms")
-def send_test_sms(phone: str = Form(...)):
-    """Send a test SMS via Twilio"""
-    from twilio.rest import Client
-    import os
-    
-    TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID')
-    TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN')
-    TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER')
-    
-    if not TWILIO_ACCOUNT_SID:
-        return HTMLResponse("<h2>❌ Twilio not configured. Missing Account SID.</h2><a href='/dashboard'>Back</a>")
-    
-    try:
-        client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-        message = client.messages.create(
-            body="🎵 Test from Studio App! Your SMS is working.",
-            from_=TWILIO_PHONE_NUMBER,
-            to=phone
-        )
-        return HTMLResponse(f"""
-        <h2>✅ Test SMS Sent!</h2>
-        <p>Message ID: {message.sid}</p>
-        <a href="/dashboard">Back</a>
-        """)
-    except Exception as e:
-        return HTMLResponse(f"<h2>❌ Error: {str(e)}</h2><a href='/dashboard'>Back</a>")
-
-
-@app.get("/debug-ledger")
-def debug_ledger():
-    """Debug endpoint to view recent ledger entries"""
-    import csv
-    import os
-    
-    LEDGER_FILE = "studio_ledger.csv"
-    
-    if not os.path.exists(LEDGER_FILE):
-        return {"exists": False, "message": "Ledger file not found"}
-    
-    entries = []
-    with open(LEDGER_FILE, 'r') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            entries.append(row)
-    
-    return {
-        "exists": True,
-        "total_entries": len(entries),
-        "last_5_entries": entries[-5:] if entries else []
-    }
