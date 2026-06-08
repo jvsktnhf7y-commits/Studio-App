@@ -706,3 +706,28 @@ def debug_ledger():
         "total_entries": len(entries),
         "last_5_entries": entries[-5:] if entries else []
     }
+
+
+@app.get("/debug-students")
+def debug_students():
+    """Debug endpoint to check student profiles"""
+    import csv
+    import os
+    
+    PROFILES_FILE = "student_profiles.csv"
+    
+    if not os.path.exists(PROFILES_FILE):
+        return {"exists": False, "message": "Student profiles file not found"}
+    
+    students = []
+    with open(PROFILES_FILE, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            students.append(row)
+    
+    return {
+        "exists": True,
+        "file_path": PROFILES_FILE,
+        "total_students": len(students),
+        "students": students
+    }
