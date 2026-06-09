@@ -132,12 +132,80 @@ def dashboard():
                     start_time = e.get('start', {}).get('dateTime', 'All day')
                     if start_time and 'T' in start_time:
                         start_time = start_time.split('T')[1][:5]
-                    calendar_html += f'<li style="padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.2);">🎵 <strong>{summary}</strong> at {start_time}</li>'
-                calendar_html += '</ul><a href="/calendar-events" style="color: white;">View All →</a></div>'
+                    # Add action buttons for each lesson
+                    calendar_html += f'''
+                    <li style="padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.2);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                            <span>🎵 <strong>{summary}</strong> at {start_time}</span>
+                            <div style="display: flex; gap: 8px; margin-top: 8px;">
+                                <form action="/log-attendance" method="post" style="display: inline;">
+                                    <input type="hidden" name="student_name" value="{summary}">
+                                    <input type="hidden" name="status" value="Confirmed">
+                                    <button type="submit" style="background: #22c55e; color: white; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer;">✅ Confirm</button>
+                                </form>
+                                <form action="/log-attendance" method="post" style="display: inline;">
+                                    <input type="hidden" name="student_name" value="{summary}">
+                                    <input type="hidden" name="status" value="Missed">
+                                    <button type="submit" style="background: #ef4444; color: white; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer;">❌ Missed</button>
+                                </form>
+                                <form action="/log-attendance" method="post" style="display: inline;">
+                                    <input type="hidden" name="student_name" value="{summary}">
+                                    <input type="hidden" name="status" value="Cancelled">
+                                    <button type="submit" style="background: #f59e0b; color: white; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer;">🔄 Cancelled</button>
+                                </form>
+                            </div>
+                        </div>
+                    </li>'''
+                calendar_html += '</ul></div>'
             else:
                 calendar_html = '<div class="card"><h2>📅 Today\'s Lessons</h2><p>No lessons scheduled for today.</p><a href="/schedule" class="btn">Schedule a Lesson</a></div>'
     except Exception as e:
         calendar_html = '<div class="card"><h2>📅 Calendar</h2><p><a href="/calendar-auth">Connect Google Calendar</a> to see your lessons.</p></div>'
+    
+    # Get student stats
+    profiles = get_all_profiles()
+    student_stats = ""
+    for name, data in profiles.items():
+        prepaid = data.get('prepaid', 0)
+        # Calculate lessons paid for (assuming $50 per lesson, adjust as needed)
+        lessons_paid = int(prepaid / 50) if prepaid > 0 else 0
+        
+        # Get attendance stats from ledger
+        attended = 0
+        missed = 0
+        cancelled = 0
+        if os.path.exists(LEDGER_FILE):
+            with open(LEDGER_FILE, 'r') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if row.get('Student', '') == name:
+                        status = row.get('Status', '')
+                        if status == 'Confirmed':
+                            attended += 1
+                        elif status == 'Missed':
+                            missed += 1
+                        elif status == 'Cancelled':
+                            cancelled += 1
+        
+        student_stats += f"""
+        <div class="student-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                <h3 style="margin: 0;">👤 {name}</h3>
+                <div style="display: flex; gap: 8px;">
+                    <span class="stat-badge" style="background: #d1fae5; color: #065f46;">✅ {attended}</span>
+                    <span class="stat-badge" style="background: #fee2e2; color: #991b1b;">❌ {missed}</span>
+                    <span class="stat-badge" style="background: #fef3c7; color: #92400e;">🔄 {cancelled}</span>
+                </div>
+            </div>
+            <div style="margin-top: 12px;">
+                <span class="stat-badge" style="background: #e0e7ff; color: #4338ca;">💰 ${prepaid:.2f} prepaid</span>
+                <span class="stat-badge" style="background: #d1fae5; color: #065f46;">📚 {lessons_paid} lessons paid</span>
+            </div>
+        </div>
+        """
+    
+    if not student_stats:
+        student_stats = '<p style="text-align: center;">No students yet. <a href="/students">Add your first student</a></p>'
     
     return HTMLResponse(f"""
     <!DOCTYPE html>
@@ -177,6 +245,32 @@ def dashboard():
                 font-size: 18px;
                 font-weight: 600;
             }}
+            .student-card {{
+                background: white;
+                border-radius: 16px;
+                padding: 18px;
+                margin-bottom: 12px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+                transition: transform 0.2s;
+            }}
+            .student-card:hover {{
+                transform: translateX(5px);
+                box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            }}
+            .stat-badge {{
+                display: inline-block;
+                padding: 4px 10px;
+                border-radius: 20px;
+                font-size: 12px;
+                font-weight: 600;
+                margin: 2px;
+            }}
+            .stats-section {{
+                background: white;
+                border-radius: 20px;
+                padding: 20px;
+                margin-bottom: 30px;
+            }}
         </style>
     </head>
     <body>
@@ -187,6 +281,11 @@ def dashboard():
             </div>
             
             {calendar_html}
+            
+            <div class="stats-section">
+                <h2>📊 Student Stats</h2>
+                {student_stats}
+            </div>
             
             <div class="dashboard-grid">
                 <a href="/students" class="nav-card">
@@ -391,6 +490,28 @@ def record_payment(student_name: str = Form(...), amount: float = Form(...), pay
         profiles[student_name]['prepaid'] = current_prepaid + amount
         save_all_profiles(profiles)
     return RedirectResponse(url="/payments", status_code=303)
+
+@app.post("/log-attendance")
+def log_attendance(student_name: str = Form(...), status: str = Form(...)):
+    """Log attendance (Confirmed, Missed, Cancelled)"""
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    # Check if this lesson was already logged today to avoid duplicates
+    already_logged = False
+    if os.path.exists(LEDGER_FILE):
+        with open(LEDGER_FILE, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if row.get('Date') == today and row.get('Student') == student_name:
+                    already_logged = True
+                    break
+
+    if not already_logged:
+        with open(LEDGER_FILE, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([today, student_name, status, "0.00", f"Attendance: {status}"])
+
+    return RedirectResponse(url="/dashboard", status_code=303)
 
 @app.get("/test")
 def test():
