@@ -278,14 +278,6 @@ def dashboard():
             <div class="stats-section">
                 <h2>📊 Student Stats</h2>
                 {student_stats}
-                <div class="card" style="text-align: center; margin-top: 20px;">
-                    <h3>💾 Data Backup</h3>
-                    <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-                        <a href="/api/backup" class="btn" download>Download JSON Backup</a>
-                        <a href="/api/backup/csv" class="btn" download>Download CSV Backup (ZIP)</a>
-                    </div>
-                    <small>Click to download all your data</small>
-                </div>
             </div>
             
             <div class="dashboard-grid">
@@ -581,6 +573,32 @@ def backup_csv():
         media_type="application/zip",
         headers={"Content-Disposition": "attachment; filename=studio_backup.zip"}
     )
+
+
+@app.get("/admin")
+def admin_panel():
+    """Admin-only page (check for admin user)"""
+    return HTMLResponse("""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Admin Panel</title>
+        <link rel="stylesheet" href="/static/style.css">
+    </head>
+    <body>
+        <div class="container">
+            <div class="card" style="text-align: center;">
+                <h1>🔐 Admin Panel</h1>
+                <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
+                    <a href="/api/backup" class="btn">📥 Download JSON Backup</a>
+                    <a href="/api/backup/csv" class="btn">📥 Download CSV Backup (ZIP)</a>
+                </div>
+                <p style="margin-top: 20px;"><a href="/dashboard">← Back to Dashboard</a></p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """)
 
 
 @app.get("/revenue")
