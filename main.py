@@ -1,17 +1,17 @@
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 import os
 import csv
 from datetime import datetime
 import hashlib
 import json
+from googleapiclient.discovery import build
 
 app = FastAPI(title="Studio App")
 
 # Create static directory
 os.makedirs("static", exist_ok=True)
-os.makedirs("/data", exist_ok=True)
 os.makedirs("/data", exist_ok=True)
 
 # CSS
@@ -96,20 +96,11 @@ def dashboard():
     # Fetch calendar events
     calendar_html = ""
     try:
-        from google.oauth2.credentials import Credentials
-        from googleapiclient.discovery import build
-        import json
         from datetime import datetime
         import pytz
-        import os
-        
-        token_path = "/data/calendar_token.json"
-        if os.path.exists(token_path):
-            with open(token_path, 'r') as f:
-                token_data = json.load(f)
-            creds = Credentials.from_authorized_user_info(token_data)
-            service = build('calendar', 'v3', credentials=creds)
-            
+
+        service = get_calendar_service()
+        if service:
             tz = pytz.timezone('America/New_York')
             now = datetime.now(tz)
             start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -159,6 +150,8 @@ def dashboard():
                 calendar_html += '</ul></div>'
             else:
                 calendar_html = '<div class="card"><h2>📅 Today\'s Lessons</h2><p>No lessons scheduled for today.</p><a href="/schedule" class="btn">Schedule a Lesson</a></div>'
+        else:
+            calendar_html = '<div class="card"><h2>📅 Calendar</h2><p><a href="/calendar-auth">Connect Google Calendar</a> to see your lessons.</p></div>'
     except Exception as e:
         calendar_html = '<div class="card"><h2>📅 Calendar</h2><p><a href="/calendar-auth">Connect Google Calendar</a> to see your lessons.</p></div>'
     
@@ -285,6 +278,14 @@ def dashboard():
             <div class="stats-section">
                 <h2>📊 Student Stats</h2>
                 {student_stats}
+                <div class="card" style="text-align: center; margin-top: 20px;">
+                    <h3>💾 Data Backup</h3>
+                    <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+                        <a href="/api/backup" class="btn" download>Download JSON Backup</a>
+                        <a href="/api/backup/csv" class="btn" download>Download CSV Backup (ZIP)</a>
+                    </div>
+                    <small>Click to download all your data</small>
+                </div>
             </div>
             
             <div class="dashboard-grid">
@@ -495,11 +496,14 @@ def record_payment(student_name: str = Form(...), amount: float = Form(...), pay
 def log_attendance(student_name: str = Form(...), status: str = Form(...)):
     """Log attendance (Confirmed, Missed, Cancelled)"""
     today = datetime.now().strftime("%Y-%m-%d")
+    profiles = get_all_profiles()
+    rate = profiles.get(student_name, {}).get('rate', DEFAULT_RATE)
+    amount_charged = rate if status in ("Confirmed", "Missed") else 0.00
 
     # Check if this lesson was already logged today to avoid duplicates
     already_logged = False
     if os.path.exists(LEDGER_FILE):
-        with open(LEDGER_FILE, 'r') as f:
+        with open(LEDGER_FILE, 'r', newline='') as f:
             reader = csv.DictReader(f)
             for row in reader:
                 if row.get('Date') == today and row.get('Student') == student_name:
@@ -509,13 +513,76 @@ def log_attendance(student_name: str = Form(...), status: str = Form(...)):
     if not already_logged:
         with open(LEDGER_FILE, 'a', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([today, student_name, status, "0.00", f"Attendance: {status}"])
+            writer.writerow([today, student_name, status, f"{amount_charged:.2f}", f"Attendance: {status}"])
 
     return RedirectResponse(url="/dashboard", status_code=303)
 
 @app.get("/test")
 def test():
     return {"status": "ok"}
+
+def calculate_total_revenue():
+    total_revenue = 0
+    if os.path.exists(LEDGER_FILE):
+        with open(LEDGER_FILE, 'r', newline='') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                amount = float(row.get("AmountCharged", 0) or 0)
+                total_revenue += amount
+    return total_revenue
+
+@app.get("/api/backup")
+def backup_data():
+    """Download all data as JSON backup"""
+    profiles = get_all_profiles()
+
+    ledger = []
+    if os.path.exists(LEDGER_FILE):
+        with open(LEDGER_FILE, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                ledger.append(row)
+
+    tiers = get_pricing_tiers()
+
+    backup_data = {
+        "backup_date": datetime.now().isoformat(),
+        "students": profiles,
+        "ledger": ledger,
+        "pricing_tiers": tiers,
+        "stats": {
+            "total_students": len(profiles),
+            "total_ledger_entries": len(ledger),
+            "total_revenue": calculate_total_revenue()
+        }
+    }
+
+    return JSONResponse(
+        content=backup_data,
+        headers={"Content-Disposition": "attachment; filename=studio_backup.json"}
+    )
+
+
+@app.get("/api/backup/csv")
+def backup_csv():
+    """Download all CSV files as a zip"""
+    import zipfile
+    from io import BytesIO
+
+    zip_buffer = BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        for file_path in [PROFILES_FILE, LEDGER_FILE, PRICING_FILE]:
+            if os.path.exists(file_path):
+                zip_file.write(file_path, arcname=os.path.basename(file_path))
+
+    zip_buffer.seek(0)
+    return Response(
+        content=zip_buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=studio_backup.zip"}
+    )
+
+
 @app.get("/revenue")
 def revenue_page():
     """Display total revenue page"""
@@ -543,32 +610,35 @@ def revenue_page():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-# function to calculate total revenue from all payments
-def calculate_total_revenue():
-    total_revenue = 0
-    if os.path.exists(LEDGER_FILE):
-        with open(LEDGER_FILE, 'r') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                amount = float(row.get("Amount", 0))
-                total_revenue += amount
-    return total_revenue
-
-# function to calculate total payments for a student
-def calculate_student_payments(student_name: str):
-    total_payments = 0
-    if os.path.exists(LEDGER_FILE):
-        with open(LEDGER_FILE, 'r') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                if row.get("Student Name", "").strip() == student_name.strip():
-                    amount = float(row.get("Amount", 0))
-                    total_payments += amount
-    return total_payments
-
-# Add this to your main.py (before the last if __name__ line)
 
 # Google Calendar endpoints
+
+def get_calendar_service():
+    """Get authenticated Google Calendar service with automatic token refresh"""
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+    import json
+    import os
+
+    token_path = '/data/calendar_token.json'
+
+    if not os.path.exists(token_path):
+        return None
+
+    with open(token_path, 'r') as f:
+        token_data = json.load(f)
+
+    creds = Credentials.from_authorized_user_info(token_data)
+
+    if creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+        with open(token_path, 'w') as f:
+            f.write(creds.to_json())
+
+    from googleapiclient.discovery import build
+    return build('calendar', 'v3', credentials=creds)
+
+
 @app.get("/calendar-auth")
 def calendar_auth():
     """Start Google Calendar authorization"""
@@ -587,7 +657,7 @@ def calendar_auth():
     
     flow = Flow.from_client_config(
         client_config,
-        scopes=['https://www.googleapis.com/auth/calendar.readonly'],
+        scopes=['https://www.googleapis.com/auth/calendar'],
         redirect_uri='https://studio-app-7y7z.onrender.com/calendar-callback'
     )
     
@@ -609,7 +679,7 @@ def calendar_callback(code: str = None):
     
     flow = Flow.from_client_config(
         client_config,
-        scopes=['https://www.googleapis.com/auth/calendar.readonly'],
+        scopes=['https://www.googleapis.com/auth/calendar'],
         redirect_uri='https://studio-app-7y7z.onrender.com/calendar-callback'
     )
     
@@ -625,22 +695,12 @@ def calendar_callback(code: str = None):
 @app.get("/calendar-events")
 def calendar_events():
     """Show today's calendar events"""
-    from google.oauth2.credentials import Credentials
-    from googleapiclient.discovery import build
-    import json
     from datetime import datetime
     import pytz
-    import os
-    
-    token_path = '/data/calendar_token.json'
-    if not os.path.exists(token_path):
+
+    service = get_calendar_service()
+    if not service:
         return HTMLResponse("<h2>Calendar not connected. <a href='/calendar-auth'>Connect here</a></h2>")
-    
-    with open(token_path, 'r') as f:
-        token_data = json.load(f)
-    
-    creds = Credentials.from_authorized_user_info(token_data)
-    service = build('calendar', 'v3', credentials=creds)
     
     tz = pytz.timezone('America/New_York')
     now = datetime.now(tz)
