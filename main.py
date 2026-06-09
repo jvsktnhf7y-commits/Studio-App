@@ -577,7 +577,7 @@ def backup_csv():
 
 @app.get("/admin")
 def admin_panel():
-    """Admin-only page (check for admin user)"""
+    """Admin-only backup page"""
     return HTMLResponse("""
     <!DOCTYPE html>
     <html>
