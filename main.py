@@ -93,40 +93,131 @@ def save_pricing_tiers(tiers_map):
 # Dashboard
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard():
-    return HTMLResponse("""
+    # Fetch calendar events
+    calendar_html = ""
+    try:
+        from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build
+        import json
+        from datetime import datetime
+        import pytz
+        import os
+        
+        token_path = "/data/calendar_token.json"
+        if os.path.exists(token_path):
+            with open(token_path, 'r') as f:
+                token_data = json.load(f)
+            creds = Credentials.from_authorized_user_info(token_data)
+            service = build('calendar', 'v3', credentials=creds)
+            
+            tz = pytz.timezone('America/New_York')
+            now = datetime.now(tz)
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            end = now.replace(hour=23, minute=59, second=59, microsecond=0)
+            
+            start_utc = start.astimezone(pytz.UTC).isoformat()
+            end_utc = end.astimezone(pytz.UTC).isoformat()
+            
+            events = service.events().list(
+                calendarId='primary',
+                timeMin=start_utc,
+                timeMax=end_utc,
+                singleEvents=True
+            ).execute().get('items', [])
+            
+            if events:
+                calendar_html = '<div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;"><h2>📅 Today\'s Lessons</h2><ul style="list-style: none; padding: 0;">'
+                for e in events:
+                    summary = e.get('summary', 'Lesson')
+                    start_time = e.get('start', {}).get('dateTime', 'All day')
+                    if start_time and 'T' in start_time:
+                        start_time = start_time.split('T')[1][:5]
+                    calendar_html += f'<li style="padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.2);">🎵 <strong>{summary}</strong> at {start_time}</li>'
+                calendar_html += '</ul><a href="/calendar-events" style="color: white;">View All →</a></div>'
+            else:
+                calendar_html = '<div class="card"><h2>📅 Today\'s Lessons</h2><p>No lessons scheduled for today.</p><a href="/schedule" class="btn">Schedule a Lesson</a></div>'
+    except Exception as e:
+        calendar_html = '<div class="card"><h2>📅 Calendar</h2><p><a href="/calendar-auth">Connect Google Calendar</a> to see your lessons.</p></div>'
+    
+    return HTMLResponse(f"""
     <!DOCTYPE html>
     <html>
-    <head><title>Studio Dashboard</title><link rel="stylesheet" href="/static/style.css"></head>
+    <head>
+        <title>Studio Dashboard</title>
+        <link rel="stylesheet" href="/static/style.css">
+        <style>
+            .dashboard-grid {{
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 20px;
+                margin-bottom: 30px;
+            }}
+            .nav-card {{
+                background: white;
+                border-radius: 16px;
+                padding: 25px 15px;
+                text-align: center;
+                text-decoration: none;
+                color: #333;
+                transition: all 0.3s;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            }}
+            .nav-card:hover {{
+                transform: translateY(-5px);
+                box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+            }}
+            .nav-emoji {{
+                font-size: 48px;
+                display: block;
+                margin-bottom: 12px;
+            }}
+            .nav-title {{
+                font-size: 18px;
+                font-weight: 600;
+            }}
+        </style>
+    </head>
     <body>
         <div class="container">
             <div class="card" style="text-align: center;">
                 <h1>🎵 Studio Console</h1>
                 <p>Welcome to your music studio management system</p>
             </div>
-            <div class="grid">
-                <a href="/students" class="card" style="text-align: center; text-decoration: none; color: #333;">
-                    <div style="font-size: 48px;">👥</div>
-                    <h3>Students</h3>
+            
+            {calendar_html}
+            
+            <div class="dashboard-grid">
+                <a href="/students" class="nav-card">
+                    <span class="nav-emoji">👥</span>
+                    <div class="nav-title">Students</div>
+                    <small>Manage profiles</small>
                 </a>
-                <a href="/rates" class="card" style="text-align: center; text-decoration: none; color: #333;">
-                    <div style="font-size: 48px;">💰</div>
-                    <h3>Rates</h3>
+                <a href="/rates" class="nav-card">
+                    <span class="nav-emoji">💰</span>
+                    <div class="nav-title">Rates</div>
+                    <small>Pricing tiers</small>
                 </a>
-                <a href="/payments" class="card" style="text-align: center; text-decoration: none; color: #333;">
-                    <div style="font-size: 48px;">💵</div>
-                    <h3>Payments</h3>
+                <a href="/payments" class="nav-card">
+                    <span class="nav-emoji">💵</span>
+                    <div class="nav-title">Payments</div>
+                    <small>Record payments</small>
                 </a>
-                <a href="/schedule" class="card" style="text-align: center; text-decoration: none; color: #333;">
-                    <div style="font-size: 48px;">📅</div>
-                    <h3>Schedule</h3>
+                <a href="/schedule" class="nav-card">
+                    <span class="nav-emoji">📅</span>
+                    <div class="nav-title">Schedule</div>
+                    <small>Book lessons</small>
                 </a>
-                <a href="/revenue" class="card" style="text-align: center; text-decoration: none; color: #333;">
-                    <div style="font-size: 48px;">📊</div>
-                    <h3>Revenue</h3>
+                <a href="/revenue" class="nav-card">
+                    <span class="nav-emoji">📊</span>
+                    <div class="nav-title">Revenue</div>
+                    <small>View earnings</small>
                 </a>
-                <a href="/logout" class="card" style="text-align: center; text-decoration: none; color: #333;">
-                    <div style="font-size: 48px;">🚪</div>
-                    <h3>Logout</h3>
+                <a href="/logout" class="nav-card">
+                    <span class="nav-emoji">🚪</span>
+                    <div class="nav-title">Logout</div>
+                    <small>End session</small>
                 </a>
             </div>
         </div>
@@ -455,4 +546,52 @@ def calendar_events():
         html += f"<li>{summary} at {start_time}</li>"
     html += "</ul><a href='/dashboard'>Back</a>"
     return HTMLResponse(html)
+
+@app.get("/debug-calendar")
+def debug_calendar():
+    """Debug calendar connection"""
+    import os
+    from google.oauth2.credentials import Credentials
+    import json
+
+    result = {
+        "token_exists": os.path.exists("/data/calendar_token.json"),
+        "token_size": 0,
+        "has_creds": bool(os.environ.get('GOOGLE_CREDENTIALS')),
+        "events_found": 0
+    }
+
+    if result["token_exists"]:
+        result["token_size"] = os.path.getsize("/data/calendar_token.json")
+
+    # Try to fetch events
+    try:
+        with open("/data/calendar_token.json", 'r') as f:
+            token_data = json.load(f)
+        creds = Credentials.from_authorized_user_info(token_data)
+        from googleapiclient.discovery import build
+        service = build('calendar', 'v3', credentials=creds)
+        
+        from datetime import datetime
+        import pytz
+        tz = pytz.timezone('America/New_York')
+        now = datetime.now(tz)
+        start = now.replace(hour=0, minute=0, second=0)
+        end = now.replace(hour=23, minute=59, second=59)
+        
+        start_utc = start.astimezone(pytz.UTC).isoformat()
+        end_utc = end.astimezone(pytz.UTC).isoformat()
+        
+        events = service.events().list(
+            calendarId='primary',
+            timeMin=start_utc,
+            timeMax=end_utc,
+            singleEvents=True
+        ).execute()
+        
+        result["events_found"] = len(events.get('items', []))
+        result["first_event"] = events.get('items', [])[0].get('summary') if events.get('items') else None
+    except Exception as e:
+        result["error"] = str(e)
     
+    return result
