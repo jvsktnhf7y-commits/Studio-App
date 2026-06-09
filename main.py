@@ -354,3 +354,105 @@ def calculate_student_payments(student_name: str):
                     total_payments += amount
     return total_payments
 
+# Add this to your main.py (before the last if __name__ line)
+
+# Google Calendar endpoints
+@app.get("/calendar-auth")
+def calendar_auth():
+    """Start Google Calendar authorization"""
+    from google_auth_oauthlib.flow import Flow
+    from fastapi.responses import RedirectResponse
+    import json
+    import os
+    
+    creds_json = os.environ.get('GOOGLE_CREDENTIALS', '')
+    if not creds_json:
+        return HTMLResponse("<h2>❌ GOOGLE_CREDENTIALS not set</h2>")
+    
+    client_config = json.loads(creds_json)
+    if 'web' not in client_config:
+        client_config = {"web": client_config}
+    
+    flow = Flow.from_client_config(
+        client_config,
+        scopes=['https://www.googleapis.com/auth/calendar.readonly'],
+        redirect_uri='https://studio-app-7y7z.onrender.com/calendar-callback'
+    )
+    
+    auth_url, _ = flow.authorization_url(access_type='offline', prompt='consent')
+    return RedirectResponse(auth_url)
+
+@app.get("/calendar-callback")
+def calendar_callback(code: str = None):
+    """Handle Google OAuth callback"""
+    from google_auth_oauthlib.flow import Flow
+    from fastapi.responses import HTMLResponse
+    import json
+    import os
+    
+    creds_json = os.environ.get('GOOGLE_CREDENTIALS', '')
+    client_config = json.loads(creds_json)
+    if 'web' not in client_config:
+        client_config = {"web": client_config}
+    
+    flow = Flow.from_client_config(
+        client_config,
+        scopes=['https://www.googleapis.com/auth/calendar.readonly'],
+        redirect_uri='https://studio-app-7y7z.onrender.com/calendar-callback'
+    )
+    
+    flow.fetch_token(code=code)
+    
+    # Save token
+    token_data = flow.credentials.to_json()
+    with open('/data/calendar_token.json', 'w') as f:
+        f.write(token_data)
+    
+    return HTMLResponse("<h2>✅ Calendar Connected!</h2><a href='/dashboard'>Back</a>")
+
+@app.get("/calendar-events")
+def calendar_events():
+    """Show today's calendar events"""
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+    import json
+    from datetime import datetime
+    import pytz
+    import os
+    
+    token_path = '/data/calendar_token.json'
+    if not os.path.exists(token_path):
+        return HTMLResponse("<h2>Calendar not connected. <a href='/calendar-auth'>Connect here</a></h2>")
+    
+    with open(token_path, 'r') as f:
+        token_data = json.load(f)
+    
+    creds = Credentials.from_authorized_user_info(token_data)
+    service = build('calendar', 'v3', credentials=creds)
+    
+    tz = pytz.timezone('America/New_York')
+    now = datetime.now(tz)
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = now.replace(hour=23, minute=59, second=59, microsecond=0)
+    
+    start_utc = start.astimezone(pytz.UTC).isoformat()
+    end_utc = end.astimezone(pytz.UTC).isoformat()
+    
+    events = service.events().list(
+        calendarId='primary',
+        timeMin=start_utc,
+        timeMax=end_utc,
+        singleEvents=True
+    ).execute().get('items', [])
+    
+    if not events:
+        return HTMLResponse("<h2>No events today</h2><a href='/dashboard'>Back</a>")
+    
+    html = "<h2>Today's Events</h2><ul>"
+    for e in events:
+        summary = e.get('summary', 'Untitled')
+        start_time = e.get('start', {}).get('dateTime', 'All day')
+        html += f"<li>{summary} at {start_time}</li>"
+    html += "</ul><a href='/dashboard'>Back</a>"
+    return HTMLResponse(html)
+    
