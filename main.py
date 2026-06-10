@@ -659,6 +659,34 @@ def revenue_page():
     </html>
     """)
 
+
+@app.post("/quick-create-student")
+def quick_create_student(student_name: str = Form(...), duration_minutes: int = Form(60)):
+    """Quickly create a student profile from calendar event"""
+    profiles = get_all_profiles()
+
+    if duration_minutes <= 30:
+        suggested_rate = 30.00
+    elif duration_minutes <= 45:
+        suggested_rate = 40.00
+    elif duration_minutes <= 60:
+        suggested_rate = 50.00
+    else:
+        suggested_rate = 75.00
+
+    profiles[student_name] = {
+        "tier_name": f"{duration_minutes} min lesson",
+        "rate": suggested_rate,
+        "target_minutes": duration_minutes,
+        "credits": 0,
+        "description": f"Auto-created from {duration_minutes} min calendar event",
+        "prepaid": 0
+    }
+    save_all_profiles(profiles)
+
+    return RedirectResponse(url="/dashboard", status_code=303)
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
