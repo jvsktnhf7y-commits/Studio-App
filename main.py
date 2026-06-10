@@ -93,6 +93,10 @@ def save_pricing_tiers(tiers_map):
 # Dashboard
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard():
+    # Get student profiles for comparison
+    existing_students = get_all_profiles()
+    existing_student_names = set(existing_students.keys())
+
     # Fetch calendar events
     calendar_html = ""
     try:
@@ -118,35 +122,65 @@ def dashboard():
             
             if events:
                 calendar_html = '<div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;"><h2>📅 Today\'s Lessons</h2><ul style="list-style: none; padding: 0;">'
+                
                 for e in events:
                     summary = e.get('summary', 'Lesson')
                     start_time = e.get('start', {}).get('dateTime', 'All day')
+                    duration_minutes = 60
+                    end_time = e.get('end', {}).get('dateTime', 'All day')
+                    if start_time and 'T' in start_time and end_time and 'T' in end_time:
+                        try:
+                            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                            end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+                            duration_minutes = int((end_dt - start_dt).total_seconds() / 60)
+                        except Exception:
+                            pass
+                    
                     if start_time and 'T' in start_time:
                         start_time = start_time.split('T')[1][:5]
-                    # Add action buttons for each lesson
-                    calendar_html += f'''
-                    <li style="padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.2);">
-                        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-                            <span>🎵 <strong>{summary}</strong> at {start_time}</span>
-                            <div style="display: flex; gap: 8px; margin-top: 8px;">
-                                <form action="/log-attendance" method="post" style="display: inline;">
-                                    <input type="hidden" name="student_name" value="{summary}">
-                                    <input type="hidden" name="status" value="Confirmed">
-                                    <button type="submit" style="background: #22c55e; color: white; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer;">✅ Confirm</button>
-                                </form>
-                                <form action="/log-attendance" method="post" style="display: inline;">
-                                    <input type="hidden" name="student_name" value="{summary}">
-                                    <input type="hidden" name="status" value="Missed">
-                                    <button type="submit" style="background: #ef4444; color: white; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer;">❌ Missed</button>
-                                </form>
-                                <form action="/log-attendance" method="post" style="display: inline;">
-                                    <input type="hidden" name="student_name" value="{summary}">
-                                    <input type="hidden" name="status" value="Cancelled">
-                                    <button type="submit" style="background: #f59e0b; color: white; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer;">🔄 Cancelled</button>
-                                </form>
+                    
+                    is_registered = summary in existing_student_names
+                    
+                    if is_registered:
+                        calendar_html += f'''
+                        <li style="padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.2);">
+                            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                                <span>🎵 <strong>{summary}</strong> at {start_time} ({duration_minutes} min)</span>
+                                <div style="display: flex; gap: 8px; margin-top: 8px;">
+                                    <form action="/log-attendance" method="post" style="display: inline;">
+                                        <input type="hidden" name="student_name" value="{summary}">
+                                        <input type="hidden" name="status" value="Confirmed">
+                                        <button type="submit" style="background: #22c55e; color: white; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer;">✅ Confirm</button>
+                                    </form>
+                                    <form action="/log-attendance" method="post" style="display: inline;">
+                                        <input type="hidden" name="student_name" value="{summary}">
+                                        <input type="hidden" name="status" value="Missed">
+                                        <button type="submit" style="background: #ef4444; color: white; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer;">❌ Missed</button>
+                                    </form>
+                                    <form action="/log-attendance" method="post" style="display: inline;">
+                                        <input type="hidden" name="student_name" value="{summary}">
+                                        <input type="hidden" name="status" value="Cancelled">
+                                        <button type="submit" style="background: #f59e0b; color: white; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer;">🔄 Cancelled</button>
+                                    </form>
+                                </div>
                             </div>
-                        </div>
-                    </li>'''
+                        </li>'''
+                    else:
+                        calendar_html += f'''
+                        <li style="padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.2);">
+                            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                                <span>🎵 <strong>{summary}</strong> at {start_time} ({duration_minutes} min)</span>
+                                <div style="display: flex; gap: 8px; margin-top: 8px;">
+                                    <form action="/quick-create-student" method="post" style="display: inline;">
+                                        <input type="hidden" name="student_name" value="{summary}">
+                                        <input type="hidden" name="duration_minutes" value="{duration_minutes}">
+                                        <button type="submit" style="background: #22c55e; color: white; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer;">✨ Quick Create</button>
+                                    </form>
+                                    <a href="/students?prefill_name={summary}" style="background: #f59e0b; color: white; text-decoration: none; padding: 6px 12px; border-radius: 8px; display: inline-block;">✏️ Full Setup</a>
+                                </div>
+                            </div>
+                            <div style="font-size: 12px; margin-top: 4px; opacity: 0.8;">⚠️ Not registered - click Quick Create to add</div>
+                        </li>'''
                 calendar_html += '</ul></div>'
             else:
                 calendar_html = '<div class="card"><h2>📅 Today\'s Lessons</h2><p>No lessons scheduled for today.</p><a href="/schedule" class="btn">Schedule a Lesson</a></div>'
