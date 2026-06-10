@@ -95,10 +95,15 @@ def extract_student_name(title):
     """Extract clean student name from various calendar title formats"""
     import re
 
+    if not title:
+        return "Unknown"
+
+    clean_title = title
+
     prefixes = [
         "Private Lesson: ", "Private Lesson - ", "Lesson: ", "Lesson - ",
         "Music Lesson: ", "Music Lesson - ", "Piano: ", "Guitar: ",
-        "with ", "& ", " - "
+        "Drums: ", "Voice: ", "Violin: ", "with ", "& "
     ]
 
     clean_title = title
@@ -106,7 +111,7 @@ def extract_student_name(title):
         if clean_title.startswith(prefix):
             clean_title = clean_title[len(prefix):]
 
-    suffixes = ["'s Lesson", "'s Private Lesson", "'s Music Lesson", " Lesson", " - Canceled", " (Rescheduled)"]
+    suffixes = ["'s Lesson", "'s Private Lesson", "'s Music Lesson", " Lesson", " - Canceled"]
     for suffix in suffixes:
         if clean_title.endswith(suffix):
             clean_title = clean_title[:-len(suffix)]
@@ -898,6 +903,38 @@ def revenue_page():
 @app.post("/quick-create-student")
 def quick_create_student(student_name: str = Form(...), duration_minutes: int = Form(60)):
     """Quickly create a student profile from calendar event"""
+    import re
+
+    raw_name = student_name
+    clean_name = raw_name
+
+    prefixes = [
+        "Private Lesson: ", "Private Lesson - ", "Lesson: ", "Lesson - ",
+        "Music Lesson: ", "Music Lesson - ", "Piano: ", "Guitar: ",
+        "Drums: ", "Voice: ", "Violin: ", "with ", "& "
+    ]
+    for prefix in prefixes:
+        if clean_name.startswith(prefix):
+            clean_name = clean_name[len(prefix):]
+            break
+
+    suffixes = ["'s Lesson", "'s Private Lesson", "'s Music Lesson", " Lesson", " - Canceled"]
+    for suffix in suffixes:
+        if clean_name.endswith(suffix):
+            clean_name = clean_name[:-len(suffix)]
+            break
+
+    if ':' in clean_name:
+        clean_name = clean_name.split(':')[-1].strip()
+    if '-' in clean_name:
+        clean_name = clean_name.split('-')[-1].strip()
+
+    clean_name = re.sub(r'\([^)]*\)', '', clean_name).strip()
+    clean_name = ' '.join(clean_name.split())
+
+    if not clean_name:
+        clean_name = raw_name
+
     profiles = get_all_profiles()
 
     if duration_minutes <= 30:
@@ -909,7 +946,7 @@ def quick_create_student(student_name: str = Form(...), duration_minutes: int = 
     else:
         suggested_rate = 75.00
 
-    profiles[student_name] = {
+    profiles[clean_name] = {
         "tier_name": f"{duration_minutes} min lesson",
         "rate": suggested_rate,
         "target_minutes": duration_minutes,
