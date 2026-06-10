@@ -90,6 +90,38 @@ def save_pricing_tiers(tiers_map):
         for name, data in tiers_map.items():
             writer.writerow([name, data['rate'], data['minutes']])
 
+
+def extract_student_name(title):
+    """Extract clean student name from various calendar title formats"""
+    import re
+
+    prefixes = [
+        "Private Lesson: ", "Private Lesson - ", "Lesson: ", "Lesson - ",
+        "Music Lesson: ", "Music Lesson - ", "Piano: ", "Guitar: ",
+        "with ", "& ", " - "
+    ]
+
+    clean_title = title
+    for prefix in prefixes:
+        if clean_title.startswith(prefix):
+            clean_title = clean_title[len(prefix):]
+
+    suffixes = ["'s Lesson", "'s Private Lesson", "'s Music Lesson", " Lesson", " - Canceled", " (Rescheduled)"]
+    for suffix in suffixes:
+        if clean_title.endswith(suffix):
+            clean_title = clean_title[:-len(suffix)]
+
+    if ':' in clean_title:
+        clean_title = clean_title.split(':')[-1].strip()
+    if '-' in clean_title and len(clean_title.split('-')) == 2:
+        clean_title = clean_title.split('-')[-1].strip()
+
+    clean_title = re.sub(r'\([^)]*\)', '', clean_title).strip()
+    clean_title = ' '.join(clean_title.split())
+
+    return clean_title if clean_title else title
+
+
 # Dashboard
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard():
@@ -124,7 +156,8 @@ def dashboard():
                 calendar_html = '<div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;"><h2>📅 Today\'s Lessons</h2><ul style="list-style: none; padding: 0;">'
                 
                 for e in events:
-                    summary = e.get('summary', 'Lesson')
+                    raw_summary = e.get('summary', 'Lesson')
+                    summary = extract_student_name(raw_summary)
                     start_time = e.get('start', {}).get('dateTime', 'All day')
                     duration_minutes = 60
                     end_time = e.get('end', {}).get('dateTime', 'All day')
@@ -413,7 +446,21 @@ def students_page(prefill_name: str = ""):
     profiles = get_all_profiles()
     rows = ""
     for name, data in profiles.items():
-        rows += f"<tr><td><strong>{name}</strong></td><td>${data['rate']}/hr</td><td>{data['credits']}</td><td>{data['description']}</td></tr>"
+        rows += f"""
+        <tr>
+            <td><strong>{name}</strong></td>
+            <td>${data['rate']}/hr</td>
+            <td>{data['credits']}</td>
+            <td>{data['description']}</td>
+            <td>
+                <a href="/edit-student/{name}" class="btn" style="background: #3b82f6; padding: 4px 12px; font-size: 12px;">✏️ Edit</a>
+                <form action="/delete-student" method="post" style="display: inline;">
+                    <input type="hidden" name="student_name" value="{name}">
+                    <button type="submit" class="btn" style="background: #ef4444; padding: 4px 12px; font-size: 12px; margin-left: 5px;" onclick="return confirm('Delete {name}?')">🗑️ Delete</button>
+                </form>
+            </td>
+        </tr>
+        """
 
     suggestions_html = ""
     try:
@@ -505,7 +552,7 @@ def students_page(prefill_name: str = ""):
                 <h1>👥 Students</h1>
                 <div style="overflow-x:auto;">
                     <table>
-                        <thead><tr><th>Name</th><th>Rate</th><th>Credits</th><th>Focus</th></tr></thead>
+                        <thead><tr><th>Name</th><th>Rate</th><th>Credits</th><th>Focus</th><th>Actions</th></tr></thead>
                         <tbody>{rows if rows else '<tr><td colspan="4">No students yet</td></tr>'}</tbody>
                     </table>
                 </div>
@@ -732,6 +779,95 @@ def admin_panel():
     </body>
     </html>
     """)
+
+
+@app.get("/edit-student/{student_name}")
+def edit_student_page(student_name: str):
+    """Edit student profile page"""
+    profiles = get_all_profiles()
+    student = profiles.get(student_name)
+
+    if not student:
+        return RedirectResponse(url="/students", status_code=303)
+
+    return HTMLResponse(f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Edit {student_name}</title>
+        <link rel="stylesheet" href="/static/style.css">
+    </head>
+    <body>
+        <div class="container">
+            <div class="card">
+                <h1>✏️ Edit Student: {student_name}</h1>
+                <form action="/update-student" method="post">
+                    <input type="hidden" name="original_name" value="{student_name}">
+                    <div class="form-group">
+                        <label>Student Name</label>
+                        <input type="text" name="name" value="{student_name}" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Hourly Rate ($)</label>
+                        <input type="number" step="0.01" name="rate" value="{student.get('rate', 50)}" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Credits</label>
+                        <input type="number" name="credits" value="{student.get('credits', 0)}">
+                    </div>
+                    <div class="form-group">
+                        <label>Prepaid Balance ($)</label>
+                        <input type="number" step="0.01" name="prepaid" value="{student.get('prepaid', 0)}">
+                    </div>
+                    <div class="form-group">
+                        <label>Target Minutes (Lesson Length)</label>
+                        <input type="number" name="target_minutes" value="{student.get('target_minutes', 60)}">
+                    </div>
+                    <div class="form-group">
+                        <label>Description / Focus</label>
+                        <input type="text" name="description" value="{student.get('description', '')}">
+                    </div>
+                    <button type="submit" class="btn">Save Changes</button>
+                    <a href="/students" class="btn">Cancel</a>
+                </form>
+            </div>
+        </div>
+    </body>
+    </html>
+    """)
+
+
+@app.post("/update-student")
+def update_student(original_name: str = Form(...), name: str = Form(...), rate: float = Form(...), credits: int = Form(0), prepaid: float = Form(0), target_minutes: int = Form(60), description: str = Form("")):
+    """Update student profile"""
+    profiles = get_all_profiles()
+
+    if original_name != name and original_name in profiles:
+        old_data = profiles.pop(original_name)
+    else:
+        old_data = profiles.get(original_name, {})
+
+    profiles[name] = {
+        "tier_name": old_data.get('tier_name', 'Custom'),
+        "rate": rate,
+        "target_minutes": target_minutes,
+        "credits": credits,
+        "description": description,
+        "prepaid": prepaid
+    }
+
+    save_all_profiles(profiles)
+    return RedirectResponse(url="/students", status_code=303)
+
+
+@app.post("/delete-student")
+def delete_student(student_name: str = Form(...)):
+    """Delete a student profile"""
+    profiles = get_all_profiles()
+    if student_name in profiles:
+        del profiles[student_name]
+        save_all_profiles(profiles)
+    return RedirectResponse(url="/students", status_code=303)
 
 
 @app.get("/revenue")
