@@ -114,6 +114,28 @@ def save_calendar_settings(settings):
         json.dump(settings, f, indent=2)
 
 
+def format_standard_time(time_str):
+    """Convert 24-hour time to 12-hour time with AM/PM"""
+    try:
+        if not time_str or time_str == 'All day':
+            return 'All day'
+
+        if 'T' in time_str:
+            time_part = time_str.split('T')[1][:5]
+        else:
+            time_part = time_str[:5]
+
+        hours, minutes = map(int, time_part.split(':'))
+        ampm = 'AM' if hours < 12 else 'PM'
+        display_hours = hours % 12
+        if display_hours == 0:
+            display_hours = 12
+
+        return f"{display_hours}:{minutes:02d} {ampm}"
+    except Exception:
+        return time_str or 'All day'
+
+
 def extract_student_name(title):
     """Extract clean student name from various calendar title formats"""
     import re
@@ -197,9 +219,7 @@ def matches_student(event_title, student_name, student_aliases):
 def dashboard(request: Request):
     existing_students = get_all_profiles()
     settings = load_calendar_settings()
-    show_all = settings.get("show_all", True)
-    if request.query_params.get("show_all") is not None:
-        show_all = request.query_params.get("show_all", "true").lower() == "true"
+    show_all = True
 
     # Fetch calendar events
     calendar_html = ""
@@ -246,7 +266,9 @@ def dashboard(request: Request):
                             pass
 
                     if start_time and 'T' in start_time:
-                        start_time = start_time.split('T')[1][:5]
+                        start_time = format_standard_time(start_time)
+                    else:
+                        start_time = format_standard_time(start_time)
 
                     matched_student = None
                     for student_name, student_data in existing_students.items():
@@ -587,11 +609,16 @@ def students_page(prefill_name: str = ""):
                             pass
 
                     if name not in suggested_students:
-                        suggested_students[name] = duration_minutes
+                        suggested_students[name] = {
+                            'duration_minutes': duration_minutes,
+                            'start_time': format_standard_time(start_time) if start_time else 'TBD',
+                        }
 
             if suggested_students:
                 suggestions_html = '<div class="card" style="background: #fef3c7; border: 2px solid #f59e0b;"><h2>💡 Suggested Students from Calendar</h2><p>These names appear in your Google Calendar but don\'t have profiles yet:</p><ul style="list-style: none; padding: 0;">'
-                for name, duration in suggested_students.items():
+                for name, info in suggested_students.items():
+                    duration = info['duration_minutes']
+                    start_label = info['start_time']
                     if duration <= 30:
                         suggested_rate = 30.00
                     elif duration <= 45:
@@ -603,7 +630,7 @@ def students_page(prefill_name: str = ""):
 
                     suggestions_html += f'''
                     <li style="padding: 10px; margin: 8px 0; background: white; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-                        <span><strong>{name}</strong> - {duration} min lessons (suggested rate: ${suggested_rate}/hr)</span>
+                        <span><strong>{name}</strong> — {start_label} • {duration} min lessons (suggested rate: ${suggested_rate}/hr)</span>
                         <form action="/quick-create-student" method="post" style="display: inline;">
                             <input type="hidden" name="student_name" value="{name}">
                             <input type="hidden" name="duration_minutes" value="{duration}">
@@ -708,7 +735,9 @@ def schedule_page():
 
 @app.post("/create-lesson")
 def create_lesson(student_name: str = Form(...), date: str = Form(...), time: str = Form(...), duration: int = Form(60)):
-    return HTMLResponse(f"""<!DOCTYPE html><html><head><title>Lesson Created</title><link rel="stylesheet" href="/static/style.css"></head><body><div class="container"><div class="card" style="text-align:center;"><h1>✅ Lesson Created!</h1><p><strong>{student_name}</strong> on {date} at {time} for {duration} minutes</p><a href="/schedule" class="btn">Schedule Another</a><a href="/dashboard" class="btn">Dashboard</a></div></div></body></html>""")
+    lesson_time = datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
+    display_time = format_standard_time(lesson_time.isoformat())
+    return HTMLResponse(f"""<!DOCTYPE html><html><head><title>Lesson Created</title><link rel="stylesheet" href="/static/style.css"></head><body><div class="container"><div class="card" style="text-align:center;"><h1>✅ Lesson Created!</h1><p><strong>{student_name}</strong> on {date} at {display_time} for {duration} minutes</p><a href="/schedule" class="btn">Schedule Another</a><a href="/dashboard" class="btn">Dashboard</a></div></div></body></html>""")
 
 @app.get("/payments", response_class=HTMLResponse)
 def payments_page():
@@ -1206,7 +1235,8 @@ def calendar_events():
     for e in events:
         summary = e.get('summary', 'Untitled')
         start_time = e.get('start', {}).get('dateTime', 'All day')
-        html += f"<li>{summary} at {start_time}</li>"
+        display_time = format_standard_time(start_time)
+        html += f"<li>{summary} at {display_time}</li>"
     html += "</ul><a href='/dashboard'>Back</a>"
     return HTMLResponse(html)
 
