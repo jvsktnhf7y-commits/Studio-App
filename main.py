@@ -38,6 +38,9 @@ PRICING_FILE = "/data/pricing_tiers.csv"
 SETTINGS_FILE = "/data/calendar_settings.json"
 DEFAULT_RATE = 50.00
 
+# Rate limiter dictionary to prevent rapid repeated clicks
+rate_limit = {}
+
 # Password file
 PASSWORD_FILE = "/data/admin_password.json"
 if not os.path.exists(PASSWORD_FILE):
@@ -486,6 +489,18 @@ def dashboard(request: Request):
                 </a>
             </div>
         </div>
+        <script>
+            document.querySelectorAll('form[action="/log-attendance"]').forEach(form => {{
+                form.addEventListener('submit', function() {{
+                    const buttons = this.querySelectorAll('button');
+                    buttons.forEach(btn => {{
+                        btn.disabled = true;
+                        btn.style.opacity = '0.5';
+                        btn.innerText = btn.innerText + ' ✓';
+                    }});
+                }});
+            }});
+        </script>
     </body>
     </html>
     """)
@@ -779,27 +794,68 @@ def record_payment(student_name: str = Form(...), amount: float = Form(...), pay
     return RedirectResponse(url="/payments", status_code=303)
 
 @app.post("/log-attendance")
-def log_attendance(student_name: str = Form(...), status: str = Form(...)):
-    """Log attendance (Confirmed, Missed, Cancelled)"""
+def log_attendance(request: Request, student_name: str = Form(...), status: str = Form(...)):
+    """Log attendance (Confirmed, Missed, Cancelled) - prevents duplicate entries"""
     today = datetime.now().strftime("%Y-%m-%d")
     profiles = get_all_profiles()
     rate = profiles.get(student_name, {}).get('rate', DEFAULT_RATE)
     amount_charged = rate if status in ("Confirmed", "Missed") else 0.00
 
-    # Check if this lesson was already logged today to avoid duplicates
+    # Rate limiting - prevent multiple clicks within 5 seconds
+    client_ip = request.client.host if request.client else "unknown"
+    key = f"{client_ip}_{student_name}"
+    now = datetime.now()
+    if key in rate_limit and (now - rate_limit[key]).total_seconds() < 5:
+        return HTMLResponse("""
+        <!DOCTYPE html>
+        <html>
+        <head><title>Too Fast</title><link rel="stylesheet" href="/static/style.css"></head>
+        <body>
+            <div class="container" style="max-width: 480px; margin-top: 40px;">
+                <div class="card" style="text-align:center;">
+                    <h1>⏳ Too Fast!</h1>
+                    <p>Please wait a moment before clicking again.</p>
+                    <a href="/dashboard" class="btn">Back to Dashboard</a>
+                </div>
+            </div>
+        </body>
+        </html>
+        """)
+    rate_limit[key] = now
+
+    # Check if this lesson was already logged today
     already_logged = False
+    existing_status = None
     if os.path.exists(LEDGER_FILE):
         with open(LEDGER_FILE, 'r', newline='') as f:
             reader = csv.DictReader(f)
             for row in reader:
                 if row.get('Date') == today and row.get('Student') == student_name:
                     already_logged = True
+                    existing_status = row.get('Status', '')
                     break
 
-    if not already_logged:
-        with open(LEDGER_FILE, 'a', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow([today, student_name, status, f"{amount_charged:.2f}", f"Attendance: {status}"])
+    if already_logged:
+        return HTMLResponse(f"""
+        <!DOCTYPE html>
+        <html>
+        <head><title>Already Logged</title><link rel="stylesheet" href="/static/style.css"></head>
+        <body>
+            <div class="container" style="max-width: 480px; margin-top: 40px;">
+                <div class="card" style="text-align:center;">
+                    <h1>⚠️ Already Logged</h1>
+                    <p>{student_name} was already marked as <strong>{existing_status}</strong> for today.</p>
+                    <p>Redirecting back to dashboard...</p>
+                    <a href="/dashboard" class="btn">Click here if not redirected</a>
+                </div>
+            </div>
+        </body>
+        </html>
+        """)
+
+    with open(LEDGER_FILE, 'a', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([today, student_name, status, f"{amount_charged:.2f}", f"Attendance: {status}"])
 
     return RedirectResponse(url="/dashboard", status_code=303)
 
