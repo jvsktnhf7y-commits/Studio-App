@@ -3,7 +3,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Resp
 from fastapi.staticfiles import StaticFiles
 import os
 import csv
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
 import json
 from googleapiclient.discovery import build
@@ -409,19 +409,118 @@ async def auth_middleware(request: Request, call_next):
 
 # Students page
 @app.get("/students", response_class=HTMLResponse)
-def students_page():
+def students_page(prefill_name: str = ""):
     profiles = get_all_profiles()
     rows = ""
     for name, data in profiles.items():
         rows += f"<tr><td><strong>{name}</strong></td><td>${data['rate']}/hr</td><td>{data['credits']}</td><td>{data['description']}</td></tr>"
+
+    suggestions_html = ""
+    try:
+        service = get_calendar_service()
+        if service:
+            from datetime import datetime
+            import pytz
+
+            tz = pytz.timezone('America/New_York')
+            now = datetime.now(tz)
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            end = now.replace(hour=23, minute=59, second=59, microsecond=0) + timedelta(days=30)
+
+            start_utc = start.astimezone(pytz.UTC).isoformat()
+            end_utc = end.astimezone(pytz.UTC).isoformat()
+
+            events = service.events().list(
+                calendarId='primary',
+                timeMin=start_utc,
+                timeMax=end_utc,
+                singleEvents=True
+            ).execute().get('items', [])
+
+            existing_names = set(profiles.keys())
+            suggested_students = {}
+
+            for e in events:
+                name = e.get('summary', '').strip()
+                if name and name not in existing_names:
+                    duration_minutes = 60
+                    start_time = e.get('start', {}).get('dateTime', '')
+                    end_time = e.get('end', {}).get('dateTime', '')
+                    if start_time and 'T' in start_time and end_time and 'T' in end_time:
+                        try:
+                            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                            end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+                            duration_minutes = int((end_dt - start_dt).total_seconds() / 60)
+                        except Exception:
+                            pass
+
+                    if name not in suggested_students:
+                        suggested_students[name] = duration_minutes
+
+            if suggested_students:
+                suggestions_html = '<div class="card" style="background: #fef3c7; border: 2px solid #f59e0b;"><h2>💡 Suggested Students from Calendar</h2><p>These names appear in your Google Calendar but don\'t have profiles yet:</p><ul style="list-style: none; padding: 0;">'
+                for name, duration in suggested_students.items():
+                    if duration <= 30:
+                        suggested_rate = 30.00
+                    elif duration <= 45:
+                        suggested_rate = 40.00
+                    elif duration <= 60:
+                        suggested_rate = 50.00
+                    else:
+                        suggested_rate = 75.00
+
+                    suggestions_html += f'''
+                    <li style="padding: 10px; margin: 8px 0; background: white; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                        <span><strong>{name}</strong> - {duration} min lessons (suggested rate: ${suggested_rate}/hr)</span>
+                        <form action="/quick-create-student" method="post" style="display: inline;">
+                            <input type="hidden" name="student_name" value="{name}">
+                            <input type="hidden" name="duration_minutes" value="{duration}">
+                            <button type="submit" style="background: #22c55e; color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer;">✨ Quick Create</button>
+                        </form>
+                    </li>'''
+                suggestions_html += '</ul></div>'
+    except Exception as e:
+        print(f"Calendar suggestion error: {e}")
+
     return HTMLResponse(f"""
     <!DOCTYPE html>
     <html>
-    <head><title>Students</title><link rel="stylesheet" href="/static/style.css"></head>
+    <head>
+        <title>Students</title>
+        <link rel="stylesheet" href="/static/style.css">
+        <style>
+            .suggestion-card {{
+                background: #fef3c7;
+                border: 2px solid #f59e0b;
+                border-radius: 20px;
+                padding: 20px;
+                margin-bottom: 24px;
+            }}
+        </style>
+    </head>
     <body>
-        <div class="container"><div class="card"><h1>👥 Students</h1>{'<table><thead><tr><th>Name</th><th>Rate</th><th>Credits</th><th>Focus</th></tr></thead><tbody>' + rows if rows else '<p>No students yet</p>' + '</tbody></table>'}</div>
-        <div class="card"><h2>➕ Add Student</h2><form action="/add-profile" method="post"><input type="text" name="name" placeholder="Student Name" required><input type="text" name="rate_tier_name" placeholder="Pricing Tier" value="Standard"><input type="text" name="description" placeholder="Focus/Instrument"><button type="submit" class="btn">Create Profile</button></form></div>
-        <a href="/dashboard" class="btn">← Back</a></div>
+        <div class="container">
+            {suggestions_html}
+            <div class="card">
+                <h1>👥 Students</h1>
+                <div style="overflow-x:auto;">
+                    <table>
+                        <thead><tr><th>Name</th><th>Rate</th><th>Credits</th><th>Focus</th></tr></thead>
+                        <tbody>{rows if rows else '<tr><td colspan="4">No students yet</td></tr>'}</tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card">
+                <h2>➕ Add Student</h2>
+                <form action="/add-profile" method="post">
+                    <input type="text" name="name" placeholder="Student Name" value="{prefill_name}" required>
+                    <input type="text" name="rate_tier_name" placeholder="Pricing Tier" value="Standard">
+                    <input type="text" name="description" placeholder="Focus/Instrument">
+                    <button type="submit" class="btn">Create Profile</button>
+                </form>
+            </div>
+            <a href="/dashboard" class="btn">← Back</a>
+        </div>
     </body>
     </html>
     """)
