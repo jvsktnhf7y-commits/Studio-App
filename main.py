@@ -35,6 +35,7 @@ with open("static/style.css", "w") as f:
 LEDGER_FILE = "/data/studio_ledger.csv"
 PROFILES_FILE = "/data/student_profiles.csv"
 PRICING_FILE = "/data/pricing_tiers.csv"
+SETTINGS_FILE = "/data/calendar_settings.json"
 DEFAULT_RATE = 50.00
 
 # Password file
@@ -58,16 +59,18 @@ def get_all_profiles():
                         "target_minutes": int(row.get("TargetMinutes", 60)),
                         "credits": int(row.get("Credits", 0)),
                         "description": row.get("Description", ""),
-                        "prepaid": float(row.get("Prepaid", 0))
+                        "prepaid": float(row.get("Prepaid", 0)),
+                        "aliases": row.get("Aliases", "").split("|") if row.get("Aliases") else []
                     }
     return profiles
 
 def save_all_profiles(profiles_map):
     with open(PROFILES_FILE, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(["Name", "TierName", "Rate", "TargetMinutes", "Credits", "Description", "Prepaid"])
+        writer.writerow(["Name", "TierName", "Rate", "TargetMinutes", "Credits", "Description", "Prepaid", "Aliases"])
         for name, data in profiles_map.items():
-            writer.writerow([name, data.get('tier_name', ''), data.get('rate', DEFAULT_RATE), data.get('target_minutes', 60), data.get('credits', 0), data.get('description', ''), data.get('prepaid', 0)])
+            aliases_str = "|".join(data.get('aliases', []))
+            writer.writerow([name, data.get('tier_name', ''), data.get('rate', DEFAULT_RATE), data.get('target_minutes', 60), data.get('credits', 0), data.get('description', ''), data.get('prepaid', 0), aliases_str])
 
 def get_pricing_tiers():
     tiers = {}
@@ -89,6 +92,26 @@ def save_pricing_tiers(tiers_map):
         writer.writerow(["TierName", "HourlyRate", "TargetMinutes"])
         for name, data in tiers_map.items():
             writer.writerow([name, data['rate'], data['minutes']])
+
+
+def load_calendar_settings():
+    defaults = {
+        "lesson_keywords": ["lesson", "private", "student", "class", "music", "piano", "guitar", "violin", "drums", "voice"],
+        "show_all": True,
+    }
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, 'r') as f:
+                loaded = json.load(f)
+            defaults.update(loaded)
+        except Exception:
+            pass
+    return defaults
+
+
+def save_calendar_settings(settings):
+    with open(SETTINGS_FILE, 'w') as f:
+        json.dump(settings, f, indent=2)
 
 
 def extract_student_name(title):
@@ -127,12 +150,56 @@ def extract_student_name(title):
     return clean_title if clean_title else title
 
 
+def looks_like_student_name(name):
+    """Filter out non-student calendar entries"""
+    skip_words = [
+        'rehearsal', 'sound check', 'dress rehearsal', 'warm up', 'break',
+        'lunch', 'meeting', 'call', 'admin', 'setup', 'teardown',
+        'travel', 'commute', 'office hours', 'prep', 'planning'
+    ]
+
+    name_lower = name.lower()
+    for word in skip_words:
+        if word in name_lower:
+            return False
+
+    generic = ['lesson', 'class', 'session', 'appointment', 'meeting']
+    if name_lower in generic:
+        return False
+
+    if name.replace(' ', '').isdigit():
+        return False
+
+    return True
+
+
+def matches_student(event_title, student_name, student_aliases):
+    """Check if an event matches a student by name or alias"""
+    event_lower = event_title.lower()
+
+    if student_name.lower() in event_lower:
+        return True
+
+    for alias in student_aliases:
+        if alias and alias.lower() in event_lower:
+            return True
+
+    name_parts = student_name.lower().split()
+    for part in name_parts:
+        if len(part) > 2 and part in event_lower:
+            return True
+
+    return False
+
+
 # Dashboard
 @app.get("/dashboard", response_class=HTMLResponse)
-def dashboard():
-    # Get student profiles for comparison
+def dashboard(request: Request):
     existing_students = get_all_profiles()
-    existing_student_names = set(existing_students.keys())
+    settings = load_calendar_settings()
+    show_all = settings.get("show_all", True)
+    if request.query_params.get("show_all") is not None:
+        show_all = request.query_params.get("show_all", "true").lower() == "true"
 
     # Fetch calendar events
     calendar_html = ""
@@ -160,9 +227,13 @@ def dashboard():
             if events:
                 calendar_html = '<div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;"><h2>📅 Today\'s Lessons</h2><ul style="list-style: none; padding: 0;">'
                 
+                lesson_keywords = [item.strip().lower() for item in settings.get('lesson_keywords', []) if item.strip()]
+                if not lesson_keywords:
+                    lesson_keywords = ['lesson', 'private', 'student', 'class', 'music', 'piano', 'guitar', 'violin', 'drums', 'voice', '🎵', '🎹', '🎸', '🎻', '🥁']
+
                 for e in events:
                     raw_summary = e.get('summary', 'Lesson')
-                    summary = extract_student_name(raw_summary)
+                    clean_name = extract_student_name(raw_summary)
                     start_time = e.get('start', {}).get('dateTime', 'All day')
                     duration_minutes = 60
                     end_time = e.get('end', {}).get('dateTime', 'All day')
@@ -173,52 +244,60 @@ def dashboard():
                             duration_minutes = int((end_dt - start_dt).total_seconds() / 60)
                         except Exception:
                             pass
-                    
+
                     if start_time and 'T' in start_time:
                         start_time = start_time.split('T')[1][:5]
-                    
-                    is_registered = summary in existing_student_names
-                    
-                    if is_registered:
+
+                    matched_student = None
+                    for student_name, student_data in existing_students.items():
+                        if matches_student(raw_summary, student_name, student_data.get('aliases', [])) or matches_student(clean_name, student_name, student_data.get('aliases', [])):
+                            matched_student = student_name
+                            break
+
+                    has_keyword = any(keyword in raw_summary.lower() for keyword in lesson_keywords)
+
+                    if matched_student:
                         calendar_html += f'''
                         <li style="padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.2);">
                             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-                                <span>🎵 <strong>{summary}</strong> at {start_time} ({duration_minutes} min)</span>
+                                <span>🎵 <strong>{matched_student}</strong> at {start_time} ({duration_minutes} min)</span>
                                 <div style="display: flex; gap: 8px; margin-top: 8px;">
                                     <form action="/log-attendance" method="post" style="display: inline;">
-                                        <input type="hidden" name="student_name" value="{summary}">
+                                        <input type="hidden" name="student_name" value="{matched_student}">
                                         <input type="hidden" name="status" value="Confirmed">
                                         <button type="submit" style="background: #22c55e; color: white; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer;">✅ Confirm</button>
                                     </form>
                                     <form action="/log-attendance" method="post" style="display: inline;">
-                                        <input type="hidden" name="student_name" value="{summary}">
+                                        <input type="hidden" name="student_name" value="{matched_student}">
                                         <input type="hidden" name="status" value="Missed">
                                         <button type="submit" style="background: #ef4444; color: white; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer;">❌ Missed</button>
                                     </form>
                                     <form action="/log-attendance" method="post" style="display: inline;">
-                                        <input type="hidden" name="student_name" value="{summary}">
+                                        <input type="hidden" name="student_name" value="{matched_student}">
                                         <input type="hidden" name="status" value="Cancelled">
                                         <button type="submit" style="background: #f59e0b; color: white; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer;">🔄 Cancelled</button>
                                     </form>
                                 </div>
                             </div>
                         </li>'''
-                    else:
+                    elif has_keyword and show_all:
                         calendar_html += f'''
                         <li style="padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.2);">
                             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-                                <span>🎵 <strong>{summary}</strong> at {start_time} ({duration_minutes} min)</span>
+                                <span>🎵 <strong>{clean_name}</strong> at {start_time} ({duration_minutes} min)</span>
                                 <div style="display: flex; gap: 8px; margin-top: 8px;">
                                     <form action="/quick-create-student" method="post" style="display: inline;">
-                                        <input type="hidden" name="student_name" value="{summary}">
+                                        <input type="hidden" name="student_name" value="{clean_name}">
                                         <input type="hidden" name="duration_minutes" value="{duration_minutes}">
                                         <button type="submit" style="background: #22c55e; color: white; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer;">✨ Quick Create</button>
                                     </form>
-                                    <a href="/students?prefill_name={summary}" style="background: #f59e0b; color: white; text-decoration: none; padding: 6px 12px; border-radius: 8px; display: inline-block;">✏️ Full Setup</a>
+                                    <a href="/students?prefill_name={clean_name}" style="background: #f59e0b; color: white; text-decoration: none; padding: 6px 12px; border-radius: 8px; display: inline-block;">✏️ Full Setup</a>
                                 </div>
                             </div>
                             <div style="font-size: 12px; margin-top: 4px; opacity: 0.8;">⚠️ Not registered - click Quick Create to add</div>
                         </li>'''
+                    else:
+                        continue
                 calendar_html += '</ul></div>'
             else:
                 calendar_html = '<div class="card"><h2>📅 Today\'s Lessons</h2><p>No lessons scheduled for today.</p><a href="/schedule" class="btn">Schedule a Lesson</a></div>'
@@ -493,8 +572,9 @@ def students_page(prefill_name: str = ""):
             suggested_students = {}
 
             for e in events:
-                name = e.get('summary', '').strip()
-                if name and name not in existing_names:
+                raw_name = e.get('summary', '').strip()
+                name = extract_student_name(raw_name)
+                if name and name not in existing_names and looks_like_student_name(name):
                     duration_minutes = 60
                     start_time = e.get('start', {}).get('dateTime', '')
                     end_time = e.get('end', {}).get('dateTime', '')
@@ -832,6 +912,11 @@ def edit_student_page(student_name: str):
                         <label>Description / Focus</label>
                         <input type="text" name="description" value="{student.get('description', '')}">
                     </div>
+                    <div class="form-group">
+                        <label>Alternative Names (comma separated)</label>
+                        <input type="text" name="aliases" value="{', '.join(student.get('aliases', []))}" placeholder="Jane, Jenny, Becky's Lesson">
+                        <small>These names will also match calendar events</small>
+                    </div>
                     <button type="submit" class="btn">Save Changes</button>
                     <a href="/students" class="btn">Cancel</a>
                 </form>
@@ -843,7 +928,7 @@ def edit_student_page(student_name: str):
 
 
 @app.post("/update-student")
-def update_student(original_name: str = Form(...), name: str = Form(...), rate: float = Form(...), credits: int = Form(0), prepaid: float = Form(0), target_minutes: int = Form(60), description: str = Form("")):
+def update_student(original_name: str = Form(...), name: str = Form(...), rate: float = Form(...), credits: int = Form(0), prepaid: float = Form(0), target_minutes: int = Form(60), description: str = Form(""), aliases: str = Form("")):
     """Update student profile"""
     profiles = get_all_profiles()
 
@@ -852,13 +937,15 @@ def update_student(original_name: str = Form(...), name: str = Form(...), rate: 
     else:
         old_data = profiles.get(original_name, {})
 
+    alias_list = [item.strip() for item in aliases.split(',') if item.strip()]
     profiles[name] = {
         "tier_name": old_data.get('tier_name', 'Custom'),
         "rate": rate,
         "target_minutes": target_minutes,
         "credits": credits,
         "description": description,
-        "prepaid": prepaid
+        "prepaid": prepaid,
+        "aliases": alias_list
     }
 
     save_all_profiles(profiles)
@@ -873,6 +960,49 @@ def delete_student(student_name: str = Form(...)):
         del profiles[student_name]
         save_all_profiles(profiles)
     return RedirectResponse(url="/students", status_code=303)
+
+
+@app.get("/settings", response_class=HTMLResponse)
+def settings_page():
+    settings = load_calendar_settings()
+    keywords = ", ".join(settings.get("lesson_keywords", []))
+    show_all_checked = "checked" if settings.get("show_all", True) else ""
+    return HTMLResponse(f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Calendar Settings</title>
+        <link rel="stylesheet" href="/static/style.css">
+    </head>
+    <body>
+        <div class="container">
+            <div class="card">
+                <h1>⚙️ Calendar Settings</h1>
+                <form action="/settings" method="post">
+                    <label>Lesson Keywords (comma separated)</label>
+                    <textarea name="lesson_keywords" rows="4" style="width:100%; padding:10px; border-radius:8px; border:2px solid #e5e7eb;">{keywords}</textarea>
+                    <label style="display:flex; align-items:center; gap:10px; margin-top:12px;">
+                        <input type="checkbox" name="show_all" value="true" {show_all_checked}>
+                        Show all lesson-like events on the dashboard
+                    </label>
+                    <button type="submit" class="btn">Save Settings</button>
+                    <a href="/dashboard" class="btn">Back</a>
+                </form>
+            </div>
+        </div>
+    </body>
+    </html>
+    """)
+
+
+@app.post("/settings")
+def save_settings(lesson_keywords: str = Form(""), show_all: str = Form("false")):
+    settings = {
+        "lesson_keywords": [item.strip() for item in lesson_keywords.split(',') if item.strip()],
+        "show_all": show_all == "true"
+    }
+    save_calendar_settings(settings)
+    return RedirectResponse(url="/settings", status_code=303)
 
 
 @app.get("/revenue")
