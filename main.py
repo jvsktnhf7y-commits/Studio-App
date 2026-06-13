@@ -14,18 +14,104 @@ app = FastAPI(title="Studio App")
 os.makedirs("static", exist_ok=True)
 os.makedirs("/data", exist_ok=True)
 
-# CSS
+# CSS — full design system
 css_content = """
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; margin: 0; }
-.container { max-width: 1200px; margin: 0 auto; }
-.card { background: white; border-radius: 24px; padding: 30px; margin-bottom: 24px; box-shadow: 0 10px 40px rgba(0,0,0,0.1); }
-h1 { font-size: 48px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0 0 10px 0; }
-.btn { display: inline-block; padding: 12px 24px; border-radius: 12px; text-decoration: none; font-weight: 600; background: #667eea; color: white; margin: 5px; }
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }
-table { width: 100%; border-collapse: collapse; }
-th { background: #667eea; color: white; padding: 12px; text-align: left; }
-td { padding: 12px; border-bottom: 1px solid #eee; }
-input, select { width: 100%; padding: 10px; margin: 5px 0; border: 2px solid #e5e7eb; border-radius: 8px; }
+:root{--primary:#6366f1;--primary-dark:#4f46e5;--secondary:#8b5cf6;--success:#10b981;--warning:#f59e0b;--danger:#ef4444;--dark:#1e293b;--muted:#64748b;--border:#e2e8f0;--bg:#f1f5f9;--sidebar:#0f172a;--sw:256px;}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--dark);min-height:100vh;font-size:14px;line-height:1.5;}
+.layout{display:flex;min-height:100vh;}
+.sidebar{width:var(--sw);background:var(--sidebar);position:fixed;top:0;left:0;bottom:0;display:flex;flex-direction:column;z-index:200;transition:transform .3s;overflow-y:auto;}
+.sidebar-brand{padding:18px 14px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;gap:12px;flex-shrink:0;}
+.brand-icon{width:36px;height:36px;border-radius:9px;background:linear-gradient(135deg,var(--primary),var(--secondary));display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;}
+.brand-name{color:#fff;font-size:14px;font-weight:700;}.brand-sub{color:rgba(255,255,255,.3);font-size:10px;margin-top:1px;}
+.sidebar-nav{flex:1;padding:10px 10px;}.nav-group{margin-bottom:18px;}
+.nav-group-label{color:rgba(255,255,255,.28);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.1px;padding:0 8px;margin-bottom:5px;}
+.nav-link{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:7px;text-decoration:none;color:rgba(255,255,255,.5);font-size:13px;font-weight:500;transition:all .15s;margin-bottom:1px;}
+.nav-link:hover{background:rgba(255,255,255,.07);color:rgba(255,255,255,.9);}
+.nav-link.active{background:linear-gradient(135deg,var(--primary),var(--secondary));color:#fff;box-shadow:0 2px 8px rgba(99,102,241,.4);}
+.nav-icon{font-size:15px;width:17px;text-align:center;flex-shrink:0;}
+.sidebar-footer{padding:10px;border-top:1px solid rgba(255,255,255,.06);flex-shrink:0;}
+.main{margin-left:var(--sw);flex:1;display:flex;flex-direction:column;min-height:100vh;}
+.topbar{background:#fff;border-bottom:1px solid var(--border);padding:0 26px;height:58px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;}
+.topbar-title{font-size:16px;font-weight:700;color:var(--dark);}
+.topbar-right{display:flex;align-items:center;gap:8px;}
+.page-body{padding:26px;flex:1;}
+.card{background:#fff;border-radius:14px;padding:22px;border:1px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,.04);margin-bottom:18px;}
+.card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+.card-title{font-size:14px;font-weight:700;color:var(--dark);}
+.stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:22px;}
+.stat-card{background:#fff;border:1px solid var(--border);border-radius:13px;padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.04);}
+.stat-icon{width:38px;height:38px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px;margin-bottom:10px;}
+.stat-val{font-size:24px;font-weight:800;color:var(--dark);}
+.stat-lbl{font-size:11px;color:var(--muted);font-weight:500;margin-top:2px;text-transform:uppercase;letter-spacing:.4px;}
+h1{font-size:22px;font-weight:800;color:var(--dark);}
+h2{font-size:16px;font-weight:700;color:var(--dark);margin-bottom:12px;}
+h3{font-size:14px;font-weight:700;color:var(--dark);}
+.btn{display:inline-flex;align-items:center;gap:5px;padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;cursor:pointer;border:none;outline:none;transition:all .15s;white-space:nowrap;background:linear-gradient(135deg,var(--primary),var(--secondary));color:#fff;box-shadow:0 1px 4px rgba(99,102,241,.3);margin:2px;}
+.btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(99,102,241,.4);}
+.btn:active{transform:none;}
+.btn-success{background:var(--success);box-shadow:0 1px 4px rgba(16,185,129,.3);}
+.btn-success:hover{box-shadow:0 4px 12px rgba(16,185,129,.4);}
+.btn-danger{background:var(--danger);box-shadow:0 1px 4px rgba(239,68,68,.3);}
+.btn-danger:hover{box-shadow:0 4px 12px rgba(239,68,68,.4);}
+.btn-warning{background:var(--warning);color:#fff;box-shadow:0 1px 4px rgba(245,158,11,.3);}
+.btn-outline{background:transparent;color:var(--primary);border:1.5px solid var(--border);box-shadow:none;}
+.btn-outline:hover{border-color:var(--primary);background:#f5f3ff;transform:none;box-shadow:none;}
+.btn-ghost{background:transparent;color:var(--muted);box-shadow:none;}
+.btn-ghost:hover{background:var(--bg);color:var(--dark);transform:none;box-shadow:none;}
+.btn-sm{padding:5px 11px;font-size:12px;border-radius:6px;margin:2px;}
+table{width:100%;border-collapse:collapse;}
+thead th{background:var(--bg);color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:9px 13px;text-align:left;border-bottom:1px solid var(--border);}
+tbody td{padding:11px 13px;border-bottom:1px solid var(--border);color:var(--dark);}
+tbody tr:last-child td{border-bottom:none;}
+tbody tr:hover td{background:#fafaff;}
+.form-group{margin-bottom:14px;}
+.form-label{display:block;font-size:12px;font-weight:600;color:var(--dark);margin-bottom:4px;}
+input[type=text],input[type=number],input[type=date],input[type=time],input[type=password],input[type=email],select,textarea{width:100%;padding:8px 11px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;color:var(--dark);background:#fff;transition:border-color .15s,box-shadow .15s;outline:none;font-family:inherit;margin:0;}
+input:focus,select:focus,textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(99,102,241,.1);}
+input[type=checkbox]{width:auto;margin-right:6px;}
+.badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;}
+.badge-success{background:#d1fae5;color:#065f46;}.badge-danger{background:#fee2e2;color:#991b1b;}
+.badge-warning{background:#fef3c7;color:#92400e;}.badge-info{background:#e0e7ff;color:#3730a3;}
+.badge-muted{background:var(--bg);color:var(--muted);}
+.stat-badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;margin:2px;}
+.event-item{padding:12px 0;border-bottom:1px solid var(--border);}
+.event-item:last-child{border-bottom:none;}
+.event-name{font-size:14px;font-weight:600;color:var(--dark);}
+.event-meta{font-size:11.5px;color:var(--muted);margin-top:2px;}
+.event-actions{display:flex;gap:5px;margin-top:8px;flex-wrap:wrap;}
+.student-row{display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid var(--border);}
+.student-row:last-child{border-bottom:none;}
+.student-avatar{width:34px;height:34px;border-radius:8px;background:linear-gradient(135deg,var(--primary),var(--secondary));display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:700;flex-shrink:0;}
+.student-info{flex:1;min-width:0;}
+.student-name{font-size:13px;font-weight:600;color:var(--dark);}
+.student-meta{font-size:11px;color:var(--muted);margin-top:1px;}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px;}
+.three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;}
+.login-wrap{min-height:100vh;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px;}
+.login-card{background:#fff;border-radius:18px;padding:36px;width:100%;max-width:390px;border:1px solid var(--border);box-shadow:0 8px 32px rgba(0,0,0,.08);}
+.login-logo{width:52px;height:52px;border-radius:13px;background:linear-gradient(135deg,var(--primary),var(--secondary));display:flex;align-items:center;justify-content:center;font-size:24px;margin:0 auto 18px;}
+.container{max-width:1100px;margin:0 auto;padding:24px;}
+.alert{padding:12px 16px;border-radius:9px;margin-bottom:14px;font-size:13px;font-weight:500;}
+.alert-warning{background:#fef3c7;color:#92400e;border:1px solid #fde68a;}
+.alert-success{background:#d1fae5;color:#065f46;border:1px solid #a7f3d0;}
+.alert-danger{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;}
+.alert-info{background:#e0e7ff;color:#3730a3;border:1px solid #c7d2fe;}
+.menu-btn{display:none;background:none;border:none;font-size:20px;cursor:pointer;color:var(--dark);padding:4px;}
+.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:150;}
+@media(max-width:768px){
+  .sidebar{transform:translateX(-100%);}
+  .sidebar.open{transform:translateX(0);}
+  .sidebar-overlay.open{display:block;}
+  .main{margin-left:0;}
+  .page-body{padding:14px;}
+  .topbar{padding:0 14px;}
+  .menu-btn{display:block;}
+  .stats-row{grid-template-columns:1fr 1fr;gap:10px;}
+  .two-col,.three-col{grid-template-columns:1fr;}
+  h1{font-size:18px;}
+}
+@media(max-width:420px){.stats-row{grid-template-columns:1fr;}}
 """
 
 with open("static/style.css", "w") as f:
@@ -47,6 +133,73 @@ if not os.path.exists(PASSWORD_FILE):
     default_hash = hashlib.sha256("studio2025".encode()).hexdigest()
     with open(PASSWORD_FILE, 'w') as f:
         json.dump({"password_hash": default_hash}, f)
+
+def page(title: str, content: str, active: str = "dashboard", extra_head: str = "") -> str:
+    links = [
+        ("dashboard", "/dashboard", "🏠", "Dashboard"),
+        ("students",  "/students",  "👥", "Students"),
+        ("rates",     "/rates",     "💰", "Rates"),
+        ("payments",  "/payments",  "💳", "Payments"),
+        ("schedule",  "/schedule",  "📅", "Schedule"),
+        ("revenue",   "/revenue",   "📊", "Revenue"),
+        ("analytics", "/analytics", "📈", "Analytics"),
+        ("settings",  "/settings",  "⚙️",  "Settings"),
+        ("admin",     "/admin",     "🔐", "Admin"),
+    ]
+    nav_html = ""
+    for k, href, icon, label in links:
+        cls = "nav-link active" if k == active else "nav-link"
+        nav_html += f'<a href="{href}" class="{cls}"><span class="nav-icon">{icon}</span>{label}</a>\n'
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title} — Studio Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+{extra_head}
+</head>
+<body>
+<div class="sidebar-overlay" id="overlay" onclick="closeSidebar()"></div>
+<div class="layout">
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <div class="brand-icon">🎵</div>
+    <div><div class="brand-name">Studio Console</div><div class="brand-sub">Music Studio Manager</div></div>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-group">
+      <div class="nav-group-label">Navigation</div>
+      {nav_html}
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a href="/logout" class="nav-link"><span class="nav-icon">🚪</span>Logout</a>
+  </div>
+</aside>
+<div class="main">
+  <header class="topbar">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <button class="menu-btn" onclick="openSidebar()">☰</button>
+      <span class="topbar-title">{title}</span>
+    </div>
+    <div class="topbar-right">
+      <a href="/dashboard" class="btn btn-ghost btn-sm">🏠</a>
+    </div>
+  </header>
+  <div class="page-body">
+    {content}
+  </div>
+</div>
+</div>
+<script>
+function openSidebar(){{document.getElementById('sidebar').classList.add('open');document.getElementById('overlay').classList.add('open');}}
+function closeSidebar(){{document.getElementById('sidebar').classList.remove('open');document.getElementById('overlay').classList.remove('open');}}
+</script>
+</body>
+</html>"""
+
 
 def get_all_profiles():
     profiles = {}
@@ -224,316 +377,206 @@ def dashboard(request: Request):
     settings = load_calendar_settings()
     show_all = True
 
-    # Fetch calendar events
-    calendar_html = ""
+    # Fetch calendar events — build event items HTML
+    today_events_html = ""
+    today_lesson_count = 0
     try:
-        from datetime import datetime
         import pytz
-
         service = get_calendar_service()
         if service:
             tz = pytz.timezone('America/New_York')
-            now = datetime.now(tz)
-            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            end = now.replace(hour=23, minute=59, second=59, microsecond=0)
-            
+            now_tz = datetime.now(tz)
+            start = now_tz.replace(hour=0, minute=0, second=0, microsecond=0)
+            end   = now_tz.replace(hour=23, minute=59, second=59, microsecond=0)
             start_utc = start.astimezone(pytz.UTC).isoformat()
-            end_utc = end.astimezone(pytz.UTC).isoformat()
-            
+            end_utc   = end.astimezone(pytz.UTC).isoformat()
             events = service.events().list(
-                calendarId='primary',
-                timeMin=start_utc,
-                timeMax=end_utc,
+                calendarId='primary', timeMin=start_utc, timeMax=end_utc,
                 singleEvents=True
             ).execute().get('items', [])
-            
-            if events:
-                calendar_html = '<div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;"><h2>📅 Today\'s Lessons</h2><ul style="list-style: none; padding: 0;">'
-                
-                lesson_keywords = [item.strip().lower() for item in settings.get('lesson_keywords', []) if item.strip()]
-                if not lesson_keywords:
-                    lesson_keywords = ['lesson', 'private', 'student', 'class', 'music', 'piano', 'guitar', 'violin', 'drums', 'voice', '🎵', '🎹', '🎸', '🎻', '🥁']
 
-                for e in events:
-                    raw_summary = e.get('summary', 'Lesson')
-                    clean_name = extract_student_name(raw_summary)
-                    start_time = e.get('start', {}).get('dateTime', 'All day')
-                    duration_minutes = 60
-                    end_time = e.get('end', {}).get('dateTime', 'All day')
-                    if start_time and 'T' in start_time and end_time and 'T' in end_time:
-                        try:
-                            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-                            end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
-                            duration_minutes = int((end_dt - start_dt).total_seconds() / 60)
-                        except Exception:
-                            pass
+            lesson_keywords = [k.strip().lower() for k in settings.get('lesson_keywords', []) if k.strip()] or \
+                ['lesson','private','student','class','music','piano','guitar','violin','drums','voice']
 
-                    if start_time and 'T' in start_time:
-                        start_time = format_standard_time(start_time)
-                    else:
-                        start_time = format_standard_time(start_time)
+            for e in events:
+                raw_summary = e.get('summary', 'Lesson')
+                clean_name  = extract_student_name(raw_summary)
+                start_time  = e.get('start', {}).get('dateTime', 'All day')
+                end_time    = e.get('end',   {}).get('dateTime', 'All day')
+                duration_minutes = 60
+                if start_time and 'T' in start_time and end_time and 'T' in end_time:
+                    try:
+                        s_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                        e_dt = datetime.fromisoformat(end_time.replace('Z',   '+00:00'))
+                        duration_minutes = int((e_dt - s_dt).total_seconds() / 60)
+                    except Exception:
+                        pass
+                display_time = format_standard_time(start_time)
 
-                    matched_student = None
-                    for student_name, student_data in existing_students.items():
-                        if matches_student(raw_summary, student_name, student_data.get('aliases', [])) or matches_student(clean_name, student_name, student_data.get('aliases', [])):
-                            matched_student = student_name
-                            break
+                matched_student = None
+                for sn, sd in existing_students.items():
+                    if matches_student(raw_summary, sn, sd.get('aliases', [])) or \
+                       matches_student(clean_name,  sn, sd.get('aliases', [])):
+                        matched_student = sn
+                        break
+                has_keyword = any(kw in raw_summary.lower() for kw in lesson_keywords)
 
-                    has_keyword = any(keyword in raw_summary.lower() for keyword in lesson_keywords)
+                if matched_student:
+                    today_lesson_count += 1
+                    today_events_html += f"""<div class="event-item">
+  <div class="event-name">🎵 {matched_student}</div>
+  <div class="event-meta">{display_time} &middot; {duration_minutes} min</div>
+  <div class="event-actions">
+    <form action="/log-attendance" method="post" style="display:inline;">
+      <input type="hidden" name="student_name" value="{matched_student}">
+      <input type="hidden" name="status" value="Confirmed">
+      <button type="submit" class="btn btn-success btn-sm">✅ Confirm</button>
+    </form>
+    <form action="/log-attendance" method="post" style="display:inline;">
+      <input type="hidden" name="student_name" value="{matched_student}">
+      <input type="hidden" name="status" value="Missed">
+      <button type="submit" class="btn btn-danger btn-sm">❌ Missed</button>
+    </form>
+    <form action="/log-attendance" method="post" style="display:inline;">
+      <input type="hidden" name="student_name" value="{matched_student}">
+      <input type="hidden" name="status" value="Cancelled">
+      <button type="submit" class="btn btn-warning btn-sm">🔄 Cancelled</button>
+    </form>
+  </div>
+</div>"""
+                elif has_keyword and show_all:
+                    today_lesson_count += 1
+                    today_events_html += f"""<div class="event-item">
+  <div class="event-name">🎵 {clean_name}</div>
+  <div class="event-meta">{display_time} &middot; {duration_minutes} min &middot; <em style="color:#f59e0b;">Not registered</em></div>
+  <div class="event-actions">
+    <form action="/quick-create-student" method="post" style="display:inline;">
+      <input type="hidden" name="student_name" value="{clean_name}">
+      <input type="hidden" name="duration_minutes" value="{duration_minutes}">
+      <button type="submit" class="btn btn-success btn-sm">✨ Quick Add</button>
+    </form>
+    <a href="/students?prefill_name={clean_name}" class="btn btn-warning btn-sm">✏️ Full Setup</a>
+  </div>
+</div>"""
+        if not today_events_html:
+            today_events_html = '<p style="color:var(--muted);font-size:13px;">No lessons today. <a href="/schedule" style="color:var(--primary);">Schedule one →</a></p>'
+        if not service:
+            today_events_html = '<p style="color:var(--muted);font-size:13px;"><a href="/calendar-auth" style="color:var(--primary);">Connect Google Calendar</a> to see today\'s lessons.</p>'
+    except Exception:
+        today_events_html = '<p style="color:var(--muted);font-size:13px;"><a href="/calendar-auth" style="color:var(--primary);">Connect Google Calendar</a> to see today\'s lessons.</p>'
 
-                    if matched_student:
-                        calendar_html += f'''
-                        <li style="padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.2);">
-                            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-                                <span>🎵 <strong>{matched_student}</strong> at {start_time} ({duration_minutes} min)</span>
-                                <div style="display: flex; gap: 8px; margin-top: 8px;">
-                                    <form action="/log-attendance" method="post" style="display: inline;">
-                                        <input type="hidden" name="student_name" value="{matched_student}">
-                                        <input type="hidden" name="status" value="Confirmed">
-                                        <button type="submit" style="background: #22c55e; color: white; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer;">✅ Confirm</button>
-                                    </form>
-                                    <form action="/log-attendance" method="post" style="display: inline;">
-                                        <input type="hidden" name="student_name" value="{matched_student}">
-                                        <input type="hidden" name="status" value="Missed">
-                                        <button type="submit" style="background: #ef4444; color: white; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer;">❌ Missed</button>
-                                    </form>
-                                    <form action="/log-attendance" method="post" style="display: inline;">
-                                        <input type="hidden" name="student_name" value="{matched_student}">
-                                        <input type="hidden" name="status" value="Cancelled">
-                                        <button type="submit" style="background: #f59e0b; color: white; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer;">🔄 Cancelled</button>
-                                    </form>
-                                </div>
-                            </div>
-                        </li>'''
-                    elif has_keyword and show_all:
-                        calendar_html += f'''
-                        <li style="padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.2);">
-                            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-                                <span>🎵 <strong>{clean_name}</strong> at {start_time} ({duration_minutes} min)</span>
-                                <div style="display: flex; gap: 8px; margin-top: 8px;">
-                                    <form action="/quick-create-student" method="post" style="display: inline;">
-                                        <input type="hidden" name="student_name" value="{clean_name}">
-                                        <input type="hidden" name="duration_minutes" value="{duration_minutes}">
-                                        <button type="submit" style="background: #22c55e; color: white; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer;">✨ Quick Create</button>
-                                    </form>
-                                    <a href="/students?prefill_name={clean_name}" style="background: #f59e0b; color: white; text-decoration: none; padding: 6px 12px; border-radius: 8px; display: inline-block;">✏️ Full Setup</a>
-                                </div>
-                            </div>
-                            <div style="font-size: 12px; margin-top: 4px; opacity: 0.8;">⚠️ Not registered - click Quick Create to add</div>
-                        </li>'''
-                    else:
-                        continue
-                calendar_html += '</ul></div>'
-            else:
-                calendar_html = '<div class="card"><h2>📅 Today\'s Lessons</h2><p>No lessons scheduled for today.</p><a href="/schedule" class="btn">Schedule a Lesson</a></div>'
-        else:
-            calendar_html = '<div class="card"><h2>📅 Calendar</h2><p><a href="/calendar-auth">Connect Google Calendar</a> to see your lessons.</p></div>'
-    except Exception as e:
-        calendar_html = '<div class="card"><h2>📅 Calendar</h2><p><a href="/calendar-auth">Connect Google Calendar</a> to see your lessons.</p></div>'
-    
-    # Get student stats
+    # Student rows + aggregate stats
     profiles = get_all_profiles()
-    student_stats = ""
+    total_prepaid = sum(d.get('prepaid', 0) for d in profiles.values())
+    total_revenue = calculate_total_revenue()
+
+    student_rows_html = ""
     for name, data in profiles.items():
         prepaid = data.get('prepaid', 0)
-        # Calculate lessons paid for (assuming $50 per lesson, adjust as needed)
-        lessons_paid = int(prepaid / 50) if prepaid > 0 else 0
-        
-        # Get attendance stats from ledger
-        attended = 0
-        missed = 0
-        cancelled = 0
+        attended = missed = cancelled = 0
         if os.path.exists(LEDGER_FILE):
             with open(LEDGER_FILE, 'r') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
+                for row in csv.DictReader(f):
                     if row.get('Student', '') == name:
-                        status = row.get('Status', '')
-                        if status == 'Confirmed':
-                            attended += 1
-                        elif status == 'Missed':
-                            missed += 1
-                        elif status == 'Cancelled':
-                            cancelled += 1
-        
-        student_stats += f"""
-        <div class="student-card">
-            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-                <h3 style="margin: 0;">👤 {name}</h3>
-                <div style="display: flex; gap: 8px;">
-                    <span class="stat-badge" style="background: #d1fae5; color: #065f46;">✅ {attended}</span>
-                    <span class="stat-badge" style="background: #fee2e2; color: #991b1b;">❌ {missed}</span>
-                    <span class="stat-badge" style="background: #fef3c7; color: #92400e;">🔄 {cancelled}</span>
-                </div>
-            </div>
-            <div style="margin-top: 12px;">
-                <span class="stat-badge" style="background: #e0e7ff; color: #4338ca;">💰 ${prepaid:.2f} prepaid</span>
-                <span class="stat-badge" style="background: #d1fae5; color: #065f46;">📚 {lessons_paid} lessons paid</span>
-            </div>
-        </div>
-        """
-    
-    if not student_stats:
-        student_stats = '<p style="text-align: center;">No students yet. <a href="/students">Add your first student</a></p>'
-    
-    return HTMLResponse(f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Studio Dashboard</title>
-        <link rel="stylesheet" href="/static/style.css">
-        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-        <style>
-            .dashboard-grid {{
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                gap: 20px;
-                margin-bottom: 30px;
-            }}
-            .nav-card {{
-                background: white;
-                border-radius: 16px;
-                padding: 25px 15px;
-                text-align: center;
-                text-decoration: none;
-                color: #333;
-                transition: all 0.3s;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            }}
-            .nav-card:hover {{
-                transform: translateY(-5px);
-                box-shadow: 0 8px 25px rgba(0,0,0,0.15);
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
-            }}
-            .nav-emoji {{
-                font-size: 48px;
-                display: block;
-                margin-bottom: 12px;
-            }}
-            .nav-title {{
-                font-size: 18px;
-                font-weight: 600;
-            }}
-            .student-card {{
-                background: white;
-                border-radius: 16px;
-                padding: 18px;
-                margin-bottom: 12px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-                transition: transform 0.2s;
-            }}
-            .student-card:hover {{
-                transform: translateX(5px);
-                box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-            }}
-            .stat-badge {{
-                display: inline-block;
-                padding: 4px 10px;
-                border-radius: 20px;
-                font-size: 12px;
-                font-weight: 600;
-                margin: 2px;
-            }}
-            .stats-section {{
-                background: white;
-                border-radius: 20px;
-                padding: 20px;
-                margin-bottom: 30px;
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="card" style="text-align: center;">
-                <h1>🎵 Studio Console</h1>
-                <p>Welcome to your music studio management system</p>
-            </div>
-            
-            {calendar_html}
-            
-            <div class="stats-section">
-                <h2>📊 Student Stats</h2>
-                {student_stats}
-            </div>
-            
-            <div class="dashboard-grid">
-                <a href="/students" class="nav-card">
-                    <span class="nav-emoji">👥</span>
-                    <div class="nav-title">Students</div>
-                    <small>Manage profiles</small>
-                </a>
-                <a href="/rates" class="nav-card">
-                    <span class="nav-emoji">💰</span>
-                    <div class="nav-title">Rates</div>
-                    <small>Pricing tiers</small>
-                </a>
-                <a href="/payments" class="nav-card">
-                    <span class="nav-emoji">💵</span>
-                    <div class="nav-title">Payments</div>
-                    <small>Record payments</small>
-                </a>
-                <a href="/schedule" class="nav-card">
-                    <span class="nav-emoji">📅</span>
-                    <div class="nav-title">Schedule</div>
-                    <small>Book lessons</small>
-                </a>
-                <a href="/revenue" class="nav-card">
-                    <span class="nav-emoji">📊</span>
-                    <div class="nav-title">Revenue</div>
-                    <small>View earnings</small>
-                </a>
-                <a href="/analytics" class="nav-card">
-                    <span class="nav-emoji">📈</span>
-                    <div class="nav-title">Analytics</div>
-                    <small>Business insights</small>
-                </a>
-                <a href="/logout" class="nav-card">
-                    <span class="nav-emoji">🚪</span>
-                    <div class="nav-title">Logout</div>
-                    <small>End session</small>
-                </a>
-            </div>
-        </div>
-        <script>
-            document.querySelectorAll('form[action="/log-attendance"]').forEach(form => {{
-                form.addEventListener('submit', function() {{
-                    const buttons = this.querySelectorAll('button');
-                    buttons.forEach(btn => {{
-                        btn.disabled = true;
-                        btn.style.opacity = '0.5';
-                        btn.innerText = btn.innerText + ' ✓';
-                    }});
-                }});
-            }});
-        </script>
-    </body>
-    </html>
-    """)
+                        s = row.get('Status', '')
+                        if s in ('Confirmed', 'Attended'): attended += 1
+                        elif s in ('Missed', 'No-Show'):   missed   += 1
+                        elif s == 'Cancelled':              cancelled += 1
+        initials = ''.join(p[0].upper() for p in name.split()[:2])
+        student_rows_html += f"""<div class="student-row">
+  <div class="student-avatar">{initials}</div>
+  <div class="student-info">
+    <div class="student-name">{name}</div>
+    <div class="student-meta">${data.get('rate', 50):.0f}/hr &middot; {data.get('target_minutes', 60)} min &middot; {data.get('description', '') or 'No description'}</div>
+  </div>
+  <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;">
+    <span class="stat-badge badge-success">✅ {attended}</span>
+    <span class="stat-badge badge-danger">❌ {missed}</span>
+    <span class="stat-badge badge-info">💰 ${prepaid:.0f}</span>
+  </div>
+</div>"""
+
+    if not student_rows_html:
+        student_rows_html = '<p style="color:var(--muted);font-size:13px;">No students yet. <a href="/students" style="color:var(--primary);">Add your first student →</a></p>'
+
+    content = f"""
+<div class="stats-row">
+  <div class="stat-card">
+    <div class="stat-icon" style="background:#ede9fe;">👥</div>
+    <div class="stat-val">{len(profiles)}</div>
+    <div class="stat-lbl">Active Students</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:#d1fae5;">📅</div>
+    <div class="stat-val">{today_lesson_count}</div>
+    <div class="stat-lbl">Today's Lessons</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:#fef3c7;">📊</div>
+    <div class="stat-val">${total_revenue:.0f}</div>
+    <div class="stat-lbl">Total Revenue</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:#e0e7ff;">💳</div>
+    <div class="stat-val">${total_prepaid:.0f}</div>
+    <div class="stat-lbl">Prepaid Balance</div>
+  </div>
+</div>
+
+<div class="two-col">
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">📅 Today's Lessons</h3>
+      <a href="/schedule" class="btn btn-outline btn-sm">+ Schedule</a>
+    </div>
+    {today_events_html}
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">👥 Students</h3>
+      <a href="/students" class="btn btn-outline btn-sm">Manage</a>
+    </div>
+    {student_rows_html}
+  </div>
+</div>
+"""
+    return HTMLResponse(page("Dashboard", content, "dashboard"))
 
 # Login
 @app.get("/login", response_class=HTMLResponse)
 def login_page(error: str = ""):
-    error_html = f'<div style="background:#fee;color:#c33;padding:10px;border-radius:8px;">{error}</div>' if error else ''
-    return HTMLResponse(f"""
-    <!DOCTYPE html>
-    <html>
-    <head><title>Login</title><link rel="stylesheet" href="/static/style.css"></head>
-    <body>
-        <div class="container" style="max-width:400px;">
-            <div class="card">
-                <h1>🎵 Studio Login</h1>
-                {error_html}
-                <form action="/login" method="post">
-                    <input type="text" name="username" placeholder="Username" required>
-                    <input type="password" name="password" placeholder="Password" required>
-                    <button type="submit" class="btn" style="width:100%;">Login</button>
-                </form>
-            </div>
-        </div>
-    </body>
-    </html>
-    """)
+    err = f'<div class="alert alert-danger">{error}</div>' if error else ''
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Login — Studio Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="login-logo">🎵</div>
+    <h1 style="text-align:center;margin-bottom:4px;">Studio Console</h1>
+    <p style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:22px;">Sign in to your account</p>
+    {err}
+    <form action="/login" method="post">
+      <div class="form-group">
+        <label class="form-label">Username</label>
+        <input type="text" name="username" placeholder="admin" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input type="password" name="password" placeholder="••••••••" required>
+      </div>
+      <button type="submit" class="btn" style="width:100%;justify-content:center;margin-top:4px;">Sign In</button>
+    </form>
+  </div>
+</div>
+</body>
+</html>""")
 
 @app.post("/login")
 def login_post(username: str = Form(...), password: str = Form(...)):
@@ -571,139 +614,104 @@ async def auth_middleware(request: Request, call_next):
 @app.get("/students", response_class=HTMLResponse)
 def students_page(prefill_name: str = ""):
     profiles = get_all_profiles()
+
     rows = ""
     for name, data in profiles.items():
-        rows += f"""
-        <tr>
-            <td><strong>{name}</strong></td>
-            <td>${data['rate']}/hr</td>
-            <td>{data['credits']}</td>
-            <td>{data['description']}</td>
-            <td>
-                <a href="/edit-student/{name}" class="btn" style="background: #3b82f6; padding: 4px 12px; font-size: 12px;">✏️ Edit</a>
-                <form action="/delete-student" method="post" style="display: inline;">
-                    <input type="hidden" name="student_name" value="{name}">
-                    <button type="submit" class="btn" style="background: #ef4444; padding: 4px 12px; font-size: 12px; margin-left: 5px;" onclick="return confirm('Delete {name}?')">🗑️ Delete</button>
-                </form>
-            </td>
-        </tr>
-        """
+        prepaid = data.get('prepaid', 0)
+        rows += f"""<tr>
+  <td><strong>{name}</strong></td>
+  <td>${data['rate']:.0f}/hr</td>
+  <td>{data.get('target_minutes', 60)} min</td>
+  <td>{data.get('description', '') or '—'}</td>
+  <td><span class="badge badge-info">${prepaid:.2f}</span></td>
+  <td>
+    <a href="/edit-student/{name}" class="btn btn-outline btn-sm">✏️ Edit</a>
+    <form action="/delete-student" method="post" style="display:inline;">
+      <input type="hidden" name="student_name" value="{name}">
+      <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Delete {name}?')">🗑️</button>
+    </form>
+  </td>
+</tr>"""
 
+    # Calendar suggestions
     suggestions_html = ""
     try:
+        import pytz
         service = get_calendar_service()
         if service:
-            from datetime import datetime
-            import pytz
-
-            tz = pytz.timezone('America/New_York')
+            tz  = pytz.timezone('America/New_York')
             now = datetime.now(tz)
-            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            end = now.replace(hour=23, minute=59, second=59, microsecond=0) + timedelta(days=30)
-
-            start_utc = start.astimezone(pytz.UTC).isoformat()
-            end_utc = end.astimezone(pytz.UTC).isoformat()
-
+            start_utc = now.replace(hour=0,  minute=0,  second=0,  microsecond=0).astimezone(pytz.UTC).isoformat()
+            end_utc   = (now.replace(hour=23, minute=59, second=59, microsecond=0) + timedelta(days=30)).astimezone(pytz.UTC).isoformat()
             events = service.events().list(
-                calendarId='primary',
-                timeMin=start_utc,
-                timeMax=end_utc,
-                singleEvents=True
+                calendarId='primary', timeMin=start_utc, timeMax=end_utc, singleEvents=True
             ).execute().get('items', [])
-
-            existing_names = set(profiles.keys())
-            suggested_students = {}
-
+            existing = set(profiles.keys())
+            suggested = {}
             for e in events:
-                raw_name = e.get('summary', '').strip()
-                name = extract_student_name(raw_name)
-                if name and name not in existing_names and looks_like_student_name(name):
-                    duration_minutes = 60
-                    start_time = e.get('start', {}).get('dateTime', '')
-                    end_time = e.get('end', {}).get('dateTime', '')
-                    if start_time and 'T' in start_time and end_time and 'T' in end_time:
+                raw = e.get('summary', '').strip()
+                sname = extract_student_name(raw)
+                if sname and sname not in existing and looks_like_student_name(sname):
+                    st = e.get('start', {}).get('dateTime', '')
+                    et = e.get('end',   {}).get('dateTime', '')
+                    dur = 60
+                    if st and 'T' in st and et and 'T' in et:
                         try:
-                            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-                            end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
-                            duration_minutes = int((end_dt - start_dt).total_seconds() / 60)
+                            dur = int((datetime.fromisoformat(et.replace('Z','+00:00')) - datetime.fromisoformat(st.replace('Z','+00:00'))).total_seconds() / 60)
                         except Exception:
                             pass
+                    if sname not in suggested:
+                        suggested[sname] = {'dur': dur, 'time': format_standard_time(st) if st else 'TBD'}
+            if suggested:
+                sug_rows = ""
+                for sname, info in suggested.items():
+                    rate = 30 if info['dur'] <= 30 else (40 if info['dur'] <= 45 else (50 if info['dur'] <= 60 else 75))
+                    sug_rows += f"""<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:10px;background:white;border-radius:9px;margin-bottom:8px;gap:8px;">
+  <span><strong>{sname}</strong> — {info['time']} · {info['dur']} min · ${rate}/hr suggested</span>
+  <form action="/quick-create-student" method="post" style="display:inline;">
+    <input type="hidden" name="student_name" value="{sname}">
+    <input type="hidden" name="duration_minutes" value="{info['dur']}">
+    <button type="submit" class="btn btn-success btn-sm">✨ Quick Add</button>
+  </form>
+</div>"""
+                suggestions_html = f'<div class="card alert-warning" style="border:1px solid #fde68a;background:#fef9ec;"><h3 style="margin-bottom:12px;">💡 Calendar Suggestions</h3>{sug_rows}</div>'
+    except Exception as exc:
+        print(f"Calendar suggestion error: {exc}")
 
-                    if name not in suggested_students:
-                        suggested_students[name] = {
-                            'duration_minutes': duration_minutes,
-                            'start_time': format_standard_time(start_time) if start_time else 'TBD',
-                        }
-
-            if suggested_students:
-                suggestions_html = '<div class="card" style="background: #fef3c7; border: 2px solid #f59e0b;"><h2>💡 Suggested Students from Calendar</h2><p>These names appear in your Google Calendar but don\'t have profiles yet:</p><ul style="list-style: none; padding: 0;">'
-                for name, info in suggested_students.items():
-                    duration = info['duration_minutes']
-                    start_label = info['start_time']
-                    if duration <= 30:
-                        suggested_rate = 30.00
-                    elif duration <= 45:
-                        suggested_rate = 40.00
-                    elif duration <= 60:
-                        suggested_rate = 50.00
-                    else:
-                        suggested_rate = 75.00
-
-                    suggestions_html += f'''
-                    <li style="padding: 10px; margin: 8px 0; background: white; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-                        <span><strong>{name}</strong> — {start_label} • {duration} min lessons (suggested rate: ${suggested_rate}/hr)</span>
-                        <form action="/quick-create-student" method="post" style="display: inline;">
-                            <input type="hidden" name="student_name" value="{name}">
-                            <input type="hidden" name="duration_minutes" value="{duration}">
-                            <button type="submit" style="background: #22c55e; color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer;">✨ Quick Create</button>
-                        </form>
-                    </li>'''
-                suggestions_html += '</ul></div>'
-    except Exception as e:
-        print(f"Calendar suggestion error: {e}")
-
-    return HTMLResponse(f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Students</title>
-        <link rel="stylesheet" href="/static/style.css">
-        <style>
-            .suggestion-card {{
-                background: #fef3c7;
-                border: 2px solid #f59e0b;
-                border-radius: 20px;
-                padding: 20px;
-                margin-bottom: 24px;
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            {suggestions_html}
-            <div class="card">
-                <h1>👥 Students</h1>
-                <div style="overflow-x:auto;">
-                    <table>
-                        <thead><tr><th>Name</th><th>Rate</th><th>Credits</th><th>Focus</th><th>Actions</th></tr></thead>
-                        <tbody>{rows if rows else '<tr><td colspan="4">No students yet</td></tr>'}</tbody>
-                    </table>
-                </div>
-            </div>
-            <div class="card">
-                <h2>➕ Add Student</h2>
-                <form action="/add-profile" method="post">
-                    <input type="text" name="name" placeholder="Student Name" value="{prefill_name}" required>
-                    <input type="text" name="rate_tier_name" placeholder="Pricing Tier" value="Standard">
-                    <input type="text" name="description" placeholder="Focus/Instrument">
-                    <button type="submit" class="btn">Create Profile</button>
-                </form>
-            </div>
-            <a href="/dashboard" class="btn">← Back</a>
-        </div>
-    </body>
-    </html>
-    """)
+    content = f"""{suggestions_html}
+<div class="card">
+  <div class="card-header">
+    <h2 style="margin:0;">👥 Students</h2>
+    <a href="/students" class="btn btn-outline btn-sm">Refresh</a>
+  </div>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Name</th><th>Rate</th><th>Lesson</th><th>Focus</th><th>Prepaid</th><th>Actions</th></tr></thead>
+      <tbody>{rows or '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted);">No students yet</td></tr>'}</tbody>
+    </table>
+  </div>
+</div>
+<div class="card">
+  <h2>➕ Add Student</h2>
+  <form action="/add-profile" method="post">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+      <div class="form-group" style="margin:0;">
+        <label class="form-label">Student Name</label>
+        <input type="text" name="name" placeholder="Full name" value="{prefill_name}" required>
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label class="form-label">Pricing Tier</label>
+        <input type="text" name="rate_tier_name" placeholder="e.g. Standard" value="Standard">
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label class="form-label">Focus / Instrument</label>
+        <input type="text" name="description" placeholder="e.g. Piano, Drums">
+      </div>
+    </div>
+    <button type="submit" class="btn" style="margin-top:14px;">Create Profile</button>
+  </form>
+</div>"""
+    return HTMLResponse(page("Students", content, "students"))
 
 @app.post("/add-profile")
 def add_profile(name: str = Form(...), rate_tier_name: str = Form(...), description: str = Form(...)):
@@ -715,20 +723,30 @@ def add_profile(name: str = Form(...), rate_tier_name: str = Form(...), descript
 @app.get("/rates", response_class=HTMLResponse)
 def rates_page():
     tiers = get_pricing_tiers()
-    rows = ""
-    for name, data in tiers.items():
-        rows += f"<tr><td><strong>{name}</strong></td><td>${data['rate']}/hr</td><td>{data['minutes']} min</td></tr>"
-    return HTMLResponse(f"""
-    <!DOCTYPE html>
-    <html>
-    <head><title>Rates</title><link rel="stylesheet" href="/static/style.css"></head>
-    <body>
-        <div class="container"><div class="card"><h1>💰 Pricing Tiers</h1>{'<table><thead><tr><th>Tier</th><th>Rate</th><th>Duration</th></tr></thead><tbody>' + rows if rows else '<p>No tiers yet</p>' + '</tbody></table>'}</div>
-        <div class="card"><h2>➕ Add Pricing Tier</h2><form action="/save-pricing-tier" method="post"><input type="text" name="tier_name" placeholder="Tier Name" required><input type="number" step="0.01" name="hourly_rate" placeholder="Hourly Rate" required><input type="number" name="target_minutes" placeholder="Minutes" value="60"><button type="submit" class="btn">Create Tier</button></form></div>
-        <a href="/dashboard" class="btn">← Back</a></div>
-    </body>
-    </html>
-    """)
+    rows = "".join(
+        f'<tr><td><strong>{n}</strong></td><td>${d["rate"]:.2f}/hr</td><td>{d["minutes"]} min</td></tr>'
+        for n, d in tiers.items()
+    )
+    content = f"""
+<div class="two-col">
+  <div class="card">
+    <h2>💰 Pricing Tiers</h2>
+    <table>
+      <thead><tr><th>Tier Name</th><th>Hourly Rate</th><th>Duration</th></tr></thead>
+      <tbody>{rows or '<tr><td colspan="3" style="text-align:center;padding:20px;color:var(--muted);">No tiers yet</td></tr>'}</tbody>
+    </table>
+  </div>
+  <div class="card">
+    <h2>➕ Add Pricing Tier</h2>
+    <form action="/save-pricing-tier" method="post">
+      <div class="form-group"><label class="form-label">Tier Name</label><input type="text" name="tier_name" placeholder="e.g. 1 Hour Standard" required></div>
+      <div class="form-group"><label class="form-label">Hourly Rate ($)</label><input type="number" step="0.01" name="hourly_rate" placeholder="50.00" required></div>
+      <div class="form-group"><label class="form-label">Duration (minutes)</label><input type="number" name="target_minutes" placeholder="60" value="60"></div>
+      <button type="submit" class="btn">Create Tier</button>
+    </form>
+  </div>
+</div>"""
+    return HTMLResponse(page("Rates", content, "rates"))
 
 @app.post("/save-pricing-tier")
 def save_pricing_tier(tier_name: str = Form(...), hourly_rate: float = Form(...), target_minutes: int = Form(60)):
@@ -740,55 +758,92 @@ def save_pricing_tier(tier_name: str = Form(...), hourly_rate: float = Form(...)
 @app.get("/schedule", response_class=HTMLResponse)
 def schedule_page():
     students = get_all_profiles()
-    options = ""
-    for name in students.keys():
-        options += f'<option value="{name}">{name}</option>'
-    return HTMLResponse(f"""
-    <!DOCTYPE html>
-    <html>
-    <head><title>Schedule</title><link rel="stylesheet" href="/static/style.css"></head>
-    <body>
-        <div class="container"><div class="card"><h1>📅 Schedule Lesson</h1><form action="/create-lesson" method="post"><select name="student_name" required><option value="">Select Student</option>{options}</select><input type="date" name="date" required><input type="time" name="time" required><select name="duration"><option value="30">30 min</option><option value="60" selected>60 min</option><option value="90">90 min</option></select><button type="submit" class="btn">Create Lesson</button></form></div>
-        <a href="/dashboard" class="btn">← Back</a></div>
-    </body>
-    </html>
-    """)
+    options = "".join(f'<option value="{n}">{n}</option>' for n in students.keys())
+    content = f"""
+<div class="card" style="max-width:520px;">
+  <h2>📅 Schedule a Lesson</h2>
+  <form action="/create-lesson" method="post">
+    <div class="form-group"><label class="form-label">Student</label>
+      <select name="student_name" required><option value="">Select student…</option>{options}</select>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div class="form-group" style="margin:0;"><label class="form-label">Date</label><input type="date" name="date" required></div>
+      <div class="form-group" style="margin:0;"><label class="form-label">Time</label><input type="time" name="time" required></div>
+    </div>
+    <div class="form-group" style="margin-top:12px;"><label class="form-label">Duration</label>
+      <select name="duration">
+        <option value="30">30 min</option>
+        <option value="45">45 min</option>
+        <option value="60" selected>60 min</option>
+        <option value="90">90 min</option>
+      </select>
+    </div>
+    <button type="submit" class="btn" style="margin-top:4px;">Book Lesson</button>
+  </form>
+</div>"""
+    return HTMLResponse(page("Schedule", content, "schedule"))
 
 @app.post("/create-lesson")
 def create_lesson(student_name: str = Form(...), date: str = Form(...), time: str = Form(...), duration: int = Form(60)):
     lesson_time = datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
     display_time = format_standard_time(lesson_time.isoformat())
-    return HTMLResponse(f"""<!DOCTYPE html><html><head><title>Lesson Created</title><link rel="stylesheet" href="/static/style.css"></head><body><div class="container"><div class="card" style="text-align:center;"><h1>✅ Lesson Created!</h1><p><strong>{student_name}</strong> on {date} at {display_time} for {duration} minutes</p><a href="/schedule" class="btn">Schedule Another</a><a href="/dashboard" class="btn">Dashboard</a></div></div></body></html>""")
+    content = f"""<div class="card" style="max-width:480px;text-align:center;">
+  <div style="font-size:48px;margin-bottom:12px;">✅</div>
+  <h2>Lesson Booked</h2>
+  <p style="margin:12px 0;"><strong>{student_name}</strong><br>
+  <span style="color:var(--muted);">{date} at {display_time} · {duration} min</span></p>
+  <div style="display:flex;gap:8px;justify-content:center;margin-top:16px;">
+    <a href="/schedule" class="btn btn-outline">+ Another</a>
+    <a href="/dashboard" class="btn">Dashboard</a>
+  </div>
+</div>"""
+    return HTMLResponse(page("Lesson Booked", content, "schedule"))
 
 @app.get("/payments", response_class=HTMLResponse)
 def payments_page():
     profiles = get_all_profiles()
-    student_options = ""
-    for name in profiles.keys():
-        student_options += f'<option value="{name}">{name}</option>'
-    
-    return HTMLResponse(f"""
-    <!DOCTYPE html>
-    <html>
-    <head><title>Record Payment</title><link rel="stylesheet" href="/static/style.css"></head>
-    <body>
-        <div class="container">
-            <div class="card">
-                <h1>💰 Record Payment</h1>
-                <form action="/record-payment" method="post">
-                    <select name="student_name" required><option value="">Select Student</option>{student_options}</select>
-                    <input type="number" step="0.01" name="amount" placeholder="Amount ($)" required>
-                    <input type="date" name="payment_date" required>
-                    <select name="payment_method"><option value="Cash">Cash</option><option value="Check">Check</option><option value="Venmo">Venmo</option><option value="Zelle">Zelle</option></select>
-                    <input type="text" name="notes" placeholder="Notes (optional)">
-                    <button type="submit" class="btn">Record Payment</button>
-                </form>
-            </div>
-            <a href="/dashboard" class="btn">← Back</a>
-        </div>
-    </body>
-    </html>
-    """)
+    options = "".join(f'<option value="{n}">{n}</option>' for n in profiles.keys())
+    # Build prepaid summary
+    balance_rows = "".join(
+        f'<tr><td><strong>{n}</strong></td>'
+        f'<td><span class="badge badge-info">${d.get("prepaid",0):.2f}</span></td>'
+        f'<td><a href="/edit-student/{n}" class="btn btn-outline btn-sm">Adjust</a></td></tr>'
+        for n, d in profiles.items()
+    )
+    content = f"""
+<div class="two-col">
+  <div class="card">
+    <h2>💳 Record Payment</h2>
+    <form action="/record-payment" method="post">
+      <div class="form-group"><label class="form-label">Student</label>
+        <select name="student_name" required><option value="">Select student…</option>{options}</select>
+      </div>
+      <div class="form-group"><label class="form-label">Amount ($)</label>
+        <input type="number" step="0.01" name="amount" placeholder="0.00" required>
+      </div>
+      <div class="form-group"><label class="form-label">Date</label>
+        <input type="date" name="payment_date" required>
+      </div>
+      <div class="form-group"><label class="form-label">Method</label>
+        <select name="payment_method">
+          <option>Cash</option><option>Check</option><option>Venmo</option><option>Zelle</option>
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Notes (optional)</label>
+        <input type="text" name="notes" placeholder="e.g. monthly prepay">
+      </div>
+      <button type="submit" class="btn">Record Payment</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>💰 Prepaid Balances</h2>
+    <table>
+      <thead><tr><th>Student</th><th>Balance</th><th></th></tr></thead>
+      <tbody>{balance_rows or '<tr><td colspan="3" style="text-align:center;padding:20px;color:var(--muted);">No students</td></tr>'}</tbody>
+    </table>
+  </div>
+</div>"""
+    return HTMLResponse(page("Payments", content, "payments"))
 
 @app.post("/record-payment")
 def record_payment(student_name: str = Form(...), amount: float = Form(...), payment_date: str = Form(...), payment_method: str = Form(...), notes: str = Form("")):
@@ -801,35 +856,29 @@ def record_payment(student_name: str = Form(...), amount: float = Form(...), pay
 
 @app.post("/log-attendance")
 def log_attendance(request: Request, student_name: str = Form(...), status: str = Form(...)):
-    """Log attendance (Confirmed, Missed, Cancelled) - prevents duplicate entries"""
+    """Log attendance and deduct lesson fee from prepaid balance."""
     today = datetime.now().strftime("%Y-%m-%d")
     profiles = get_all_profiles()
-    rate = profiles.get(student_name, {}).get('rate', DEFAULT_RATE)
-    amount_charged = rate if status in ("Confirmed", "Missed") else 0.00
+    student = profiles.get(student_name, {})
+    rate = student.get('rate', DEFAULT_RATE)
+    prepaid = float(student.get('prepaid', 0.0))
 
-    # Rate limiting - prevent multiple clicks within 5 seconds
+    # Rate limiting
     client_ip = request.client.host if request.client else "unknown"
     key = f"{client_ip}_{student_name}"
     now = datetime.now()
     if key in rate_limit and (now - rate_limit[key]).total_seconds() < 5:
-        return HTMLResponse("""
-        <!DOCTYPE html>
-        <html>
-        <head><title>Too Fast</title><link rel="stylesheet" href="/static/style.css"></head>
-        <body>
-            <div class="container" style="max-width: 480px; margin-top: 40px;">
-                <div class="card" style="text-align:center;">
-                    <h1>⏳ Too Fast!</h1>
-                    <p>Please wait a moment before clicking again.</p>
-                    <a href="/dashboard" class="btn">Back to Dashboard</a>
-                </div>
-            </div>
-        </body>
-        </html>
-        """)
+        return HTMLResponse("""<!DOCTYPE html>
+        <html><head><title>Too Fast</title><link rel="stylesheet" href="/static/style.css"></head>
+        <body><div class="container" style="max-width:480px;margin-top:40px;">
+            <div class="card" style="text-align:center;">
+                <h1>⏳ Too Fast!</h1>
+                <p>Please wait a moment before clicking again.</p>
+                <a href="/dashboard" class="btn">Back to Dashboard</a>
+            </div></div></body></html>""")
     rate_limit[key] = now
 
-    # Check if this lesson was already logged today
+    # Duplicate check
     already_logged = False
     existing_status = None
     if os.path.exists(LEDGER_FILE):
@@ -842,28 +891,92 @@ def log_attendance(request: Request, student_name: str = Form(...), status: str 
                     break
 
     if already_logged:
-        return HTMLResponse(f"""
-        <!DOCTYPE html>
-        <html>
-        <head><title>Already Logged</title><link rel="stylesheet" href="/static/style.css"></head>
-        <body>
-            <div class="container" style="max-width: 480px; margin-top: 40px;">
-                <div class="card" style="text-align:center;">
-                    <h1>⚠️ Already Logged</h1>
-                    <p>{student_name} was already marked as <strong>{existing_status}</strong> for today.</p>
-                    <p>Redirecting back to dashboard...</p>
-                    <a href="/dashboard" class="btn">Click here if not redirected</a>
-                </div>
-            </div>
-        </body>
-        </html>
-        """)
+        return HTMLResponse(f"""<!DOCTYPE html>
+        <html><head><title>Already Logged</title><link rel="stylesheet" href="/static/style.css"></head>
+        <body><div class="container" style="max-width:480px;margin-top:40px;">
+            <div class="card" style="text-align:center;">
+                <h1>⚠️ Already Logged</h1>
+                <p>{student_name} was already marked as <strong>{existing_status}</strong> for today.</p>
+                <meta http-equiv="refresh" content="3;url=/dashboard">
+                <p style="color:#888;font-size:14px;">Redirecting in 3 seconds…</p>
+                <a href="/dashboard" class="btn">Back to Dashboard</a>
+            </div></div></body></html>""")
 
+    # Determine charge and new balance
+    if status == 'Cancelled':
+        amount_charged = 0.00
+        new_prepaid = prepaid
+        ledger_status = 'Cancelled'
+        ledger_note = 'Cancelled — no charge'
+        insufficient = False
+    else:
+        # Confirmed and Missed both charge the full lesson rate
+        if prepaid >= rate:
+            amount_charged = rate
+            new_prepaid = prepaid - rate
+            ledger_status = status
+            ledger_note = f"Deducted from prepaid: ${prepaid:.2f} → ${new_prepaid:.2f}"
+            insufficient = False
+        else:
+            amount_charged = 0.00
+            new_prepaid = prepaid
+            ledger_status = 'Payment Due'
+            ledger_note = f"Insufficient prepaid balance (${prepaid:.2f}) — payment required"
+            insufficient = True
+
+    # Write ledger entry
     with open(LEDGER_FILE, 'a', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow([today, student_name, status, f"{amount_charged:.2f}", f"Attendance: {status}"])
+        writer.writerow([today, student_name, ledger_status, f"{amount_charged:.2f}", ledger_note])
 
-    return RedirectResponse(url="/dashboard", status_code=303)
+    # Update prepaid balance in profiles
+    if student_name in profiles:
+        profiles[student_name]['prepaid'] = round(new_prepaid, 2)
+        save_all_profiles(profiles)
+
+    # Insufficient balance warning page
+    if insufficient:
+        return HTMLResponse(f"""<!DOCTYPE html>
+        <html><head><title>Insufficient Balance</title><link rel="stylesheet" href="/static/style.css"></head>
+        <body><div class="container" style="max-width:520px;margin-top:40px;">
+            <div class="card" style="text-align:center;">
+                <h1>⚠️ Insufficient Balance</h1>
+                <p><strong>{student_name}</strong> has been marked as
+                   <strong>{status}</strong> in the ledger.</p>
+                <div style="background:#fef3c7;border:2px solid #f59e0b;border-radius:16px;padding:20px;margin:20px 0;">
+                    <p style="margin:0;font-size:16px;color:#92400e;">
+                        <strong>Current prepaid balance: ${prepaid:.2f}</strong><br>
+                        Lesson rate: ${rate:.2f}<br><br>
+                        Insufficient prepaid balance.<br>Please collect payment first.
+                    </p>
+                </div>
+                <p style="color:#666;font-size:14px;">Lesson logged as <em>Payment Due</em> — no amount deducted.</p>
+                <a href="/dashboard" class="btn">Back to Dashboard</a>
+                <a href="/payments" class="btn" style="background:#22c55e;">Record Payment</a>
+            </div></div></body></html>""")
+
+    # Cancelled — silent redirect
+    if status == 'Cancelled':
+        return RedirectResponse(url="/dashboard", status_code=303)
+
+    # Success confirmation with auto-redirect
+    emoji = "✅" if status == "Confirmed" else "❌"
+    return HTMLResponse(f"""<!DOCTYPE html>
+    <html><head><title>Lesson Logged</title><link rel="stylesheet" href="/static/style.css">
+    <meta http-equiv="refresh" content="3;url=/dashboard"></head>
+    <body><div class="container" style="max-width:520px;margin-top:40px;">
+        <div class="card" style="text-align:center;">
+            <h1>{emoji} Lesson Logged</h1>
+            <p><strong>{student_name}</strong> marked as <strong>{status}</strong>.</p>
+            <div style="background:#d1fae5;border:2px solid #22c55e;border-radius:16px;padding:20px;margin:20px 0;">
+                <p style="margin:0;font-size:16px;color:#065f46;">
+                    <strong>💰 ${amount_charged:.2f} deducted from prepaid</strong><br>
+                    New balance: <strong>${new_prepaid:.2f}</strong>
+                </p>
+            </div>
+            <p style="color:#888;font-size:14px;">Redirecting in 3 seconds…</p>
+            <a href="/dashboard" class="btn">Back to Dashboard</a>
+        </div></div></body></html>""")
 
 @app.get("/test")
 def test():
@@ -1141,360 +1254,103 @@ def analytics_page():
     total_prepaid = data['total_prepaid']
     total_credits = data['total_credits']
 
-    return HTMLResponse(f"""<!DOCTYPE html>
-<html>
-<head>
-    <title>Analytics Dashboard</title>
-    <link rel="stylesheet" href="/static/style.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    <style>
-        .kpi-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-            gap: 18px;
-            margin-bottom: 24px;
-        }}
-        .kpi-card {{
-            background: white;
-            border-radius: 20px;
-            padding: 24px 20px;
-            text-align: center;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-        }}
-        .kpi-value {{
-            font-size: 34px;
-            font-weight: 800;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            line-height: 1.2;
-        }}
-        .kpi-label {{
-            color: #777;
-            font-size: 12px;
-            font-weight: 700;
-            margin-top: 8px;
-            text-transform: uppercase;
-            letter-spacing: 0.8px;
-        }}
-        .section-title {{
-            font-size: 20px;
-            font-weight: 700;
-            color: rgba(255,255,255,0.95);
-            margin: 28px 0 14px 0;
-            text-shadow: 0 1px 3px rgba(0,0,0,0.2);
-        }}
-        .chart-card {{
-            background: white;
-            border-radius: 24px;
-            padding: 24px;
-            box-shadow: 0 8px 30px rgba(0,0,0,0.08);
-        }}
-        .chart-card h3 {{
-            margin: 0 0 18px 0;
-            color: #222;
-            font-size: 15px;
-            font-weight: 700;
-            letter-spacing: 0.2px;
-        }}
-        .two-col {{
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 18px;
-            margin-bottom: 18px;
-        }}
-        .three-col {{
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
-            gap: 18px;
-            margin-bottom: 18px;
-        }}
-        @media (max-width: 900px) {{
-            .two-col, .three-col {{ grid-template-columns: 1fr; }}
-        }}
-        @media (max-width: 480px) {{
-            .kpi-value {{ font-size: 26px; }}
-        }}
-        table {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
-        th {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 10px 14px;
-            text-align: left;
-            font-size: 13px;
-        }}
-        th:first-child {{ border-radius: 10px 0 0 0; }}
-        th:last-child {{ border-radius: 0 10px 0 0; }}
-        td {{ padding: 10px 14px; border-bottom: 1px solid #f2f0f7; }}
-        tr:last-child td {{ border-bottom: none; }}
-        tr:hover td {{ background: #faf9ff; }}
-        .proj-box {{
-            border-radius: 16px;
-            padding: 18px 20px;
-            text-align: center;
-            margin-bottom: 12px;
-        }}
-        .proj-val {{
-            font-size: 30px;
-            font-weight: 800;
-            line-height: 1.1;
-        }}
-        .proj-lbl {{
-            font-size: 13px;
-            font-weight: 600;
-            margin-top: 6px;
-        }}
-        .att-legend {{
-            display: flex;
-            justify-content: center;
-            gap: 18px;
-            margin-top: 14px;
-            flex-wrap: wrap;
-            font-size: 13px;
-            font-weight: 600;
-        }}
-    </style>
-</head>
-<body>
-<div class="container">
+    rev_summary = ''.join(
+        f'<tr><td><strong>{s["name"]}</strong></td><td style="color:var(--success);font-weight:700;">${s["rev"]:.2f}</td></tr>'
+        for s in data['revenue_by_student']
+    ) or '<tr><td colspan="2" style="text-align:center;padding:16px;color:var(--muted);">No data yet</td></tr>'
 
-    <div class="card" style="text-align:center; margin-bottom:24px;">
-        <h1>📊 Analytics Dashboard</h1>
-        <p style="color:#888; margin:4px 0 16px;">Real-time business insights for your studio</p>
-        <a href="/dashboard" class="btn">← Dashboard</a>
-    </div>
+    content = f"""
+<style>
+.kpi-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:22px;}}
+.kpi-card{{background:#fff;border:1px solid var(--border);border-radius:13px;padding:18px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.04);}}
+.kpi-value{{font-size:28px;font-weight:800;background:linear-gradient(135deg,var(--primary),var(--secondary));-webkit-background-clip:text;-webkit-text-fill-color:transparent;line-height:1.2;}}
+.kpi-label{{color:var(--muted);font-size:11px;font-weight:700;margin-top:6px;text-transform:uppercase;letter-spacing:.7px;}}
+.an-title{{font-size:16px;font-weight:700;color:var(--dark);margin:22px 0 12px;display:flex;align-items:center;gap:8px;}}
+.chart-card{{background:#fff;border-radius:13px;padding:20px;border:1px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,.04);margin-bottom:16px;}}
+.chart-card h3{{font-size:13px;font-weight:700;color:var(--dark);margin:0 0 14px;}}
+.proj-box{{border-radius:12px;padding:16px;text-align:center;margin-bottom:10px;}}
+.proj-val{{font-size:26px;font-weight:800;line-height:1.1;}}
+.proj-lbl{{font-size:12px;font-weight:600;margin-top:5px;}}
+.att-leg{{display:flex;justify-content:center;gap:14px;margin-top:12px;flex-wrap:wrap;font-size:12px;font-weight:600;}}
+</style>
 
-    <!-- KPI Row -->
-    <div class="kpi-grid">
-        <div class="kpi-card">
-            <div class="kpi-value">${total_revenue:.2f}</div>
-            <div class="kpi-label">Total Revenue</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-value">{total_students}</div>
-            <div class="kpi-label">Active Students</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-value">{avg_lessons}</div>
-            <div class="kpi-label">Avg Lessons / Student</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-value">{confirmed_pct}%</div>
-            <div class="kpi-label">Attendance Rate</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-value">${projected:.2f}</div>
-            <div class="kpi-label">Projected Next Month</div>
-        </div>
-    </div>
+<div class="kpi-grid">
+  <div class="kpi-card"><div class="kpi-value">${total_revenue:.2f}</div><div class="kpi-label">Total Revenue</div></div>
+  <div class="kpi-card"><div class="kpi-value">{total_students}</div><div class="kpi-label">Active Students</div></div>
+  <div class="kpi-card"><div class="kpi-value">{avg_lessons}</div><div class="kpi-label">Avg Lessons / Student</div></div>
+  <div class="kpi-card"><div class="kpi-value">{confirmed_pct}%</div><div class="kpi-label">Attendance Rate</div></div>
+  <div class="kpi-card"><div class="kpi-value">${projected:.2f}</div><div class="kpi-label">Projected Next Month</div></div>
+</div>
 
-    <!-- Revenue -->
-    <div class="section-title">💰 Revenue Analytics</div>
-    <div class="two-col">
-        <div class="chart-card">
-            <h3>Monthly Revenue — Last 6 Months</h3>
-            <canvas id="monthlyRevenueChart"></canvas>
-        </div>
-        <div class="chart-card">
-            <h3>Revenue by Student (Top 5)</h3>
-            <canvas id="studentRevenueChart"></canvas>
-        </div>
-    </div>
-    <div class="two-col" style="margin-bottom:0;">
-        <div class="chart-card">
-            <h3>Revenue by Lesson Length</h3>
-            <table>
-                <thead><tr><th>Lesson Type</th><th>Revenue</th></tr></thead>
-                <tbody>{length_rows}</tbody>
-            </table>
-        </div>
-        <div class="chart-card">
-            <h3>Revenue Summary</h3>
-            <table>
-                <thead><tr><th>Student</th><th>Revenue</th></tr></thead>
-                <tbody>{''.join(f'<tr><td><strong>{s["name"]}</strong></td><td style="color:#22c55e;font-weight:700;">${s["rev"]:.2f}</td></tr>' for s in data['revenue_by_student']) or '<tr><td colspan="2" style="text-align:center;color:#888;padding:20px;">No revenue data yet</td></tr>'}</tbody>
-            </table>
-        </div>
-    </div>
+<div class="an-title">💰 Revenue Analytics</div>
+<div class="two-col">
+  <div class="chart-card"><h3>Monthly Revenue — Last 6 Months</h3><canvas id="monthlyRevenueChart"></canvas></div>
+  <div class="chart-card"><h3>Top Students by Revenue</h3><canvas id="studentRevenueChart"></canvas></div>
+</div>
+<div class="two-col">
+  <div class="chart-card"><h3>Revenue by Lesson Length</h3>
+    <table><thead><tr><th>Type</th><th>Revenue</th></tr></thead><tbody>{length_rows}</tbody></table>
+  </div>
+  <div class="chart-card"><h3>Revenue by Student</h3>
+    <table><thead><tr><th>Student</th><th>Revenue</th></tr></thead><tbody>{rev_summary}</tbody></table>
+  </div>
+</div>
 
-    <!-- Attendance -->
-    <div class="section-title">📅 Attendance Analytics</div>
-    <div class="two-col">
-        <div class="chart-card">
-            <h3>Overall Attendance Breakdown</h3>
-            <canvas id="attendanceDoughnut" style="max-height:260px;"></canvas>
-            <div class="att-legend">
-                <span style="color:#22c55e;">✅ Confirmed {confirmed_pct}%</span>
-                <span style="color:#ef4444;">❌ Missed {missed_pct}%</span>
-                <span style="color:#f59e0b;">🔄 Cancelled {cancelled_pct}%</span>
-            </div>
-        </div>
-        <div class="chart-card">
-            <h3>Monthly Attendance Trend (3 Months)</h3>
-            <canvas id="monthlyAttChart"></canvas>
-        </div>
+<div class="an-title">📅 Attendance Analytics</div>
+<div class="two-col">
+  <div class="chart-card"><h3>Overall Attendance</h3>
+    <canvas id="attendanceDoughnut" style="max-height:220px;"></canvas>
+    <div class="att-leg">
+      <span style="color:var(--success);">✅ {confirmed_pct}%</span>
+      <span style="color:var(--danger);">❌ {missed_pct}%</span>
+      <span style="color:var(--warning);">🔄 {cancelled_pct}%</span>
     </div>
+  </div>
+  <div class="chart-card"><h3>Monthly Trend (3 Months)</h3><canvas id="monthlyAttChart"></canvas></div>
+</div>
+<div class="chart-card">
+  <h3>Student Reliability</h3>
+  <table><thead><tr><th>Student</th><th>Rate</th><th>✅ Confirmed</th><th>❌ Missed</th><th>🔄 Cancelled</th></tr></thead>
+  <tbody>{reliability_rows}</tbody></table>
+</div>
 
-    <div class="chart-card" style="margin-bottom:18px;">
-        <h3>Student Reliability</h3>
-        <table>
-            <thead><tr><th>Student</th><th>Attendance Rate</th><th>✅ Confirmed</th><th>❌ Missed</th><th>🔄 Cancelled</th></tr></thead>
-            <tbody>{reliability_rows}</tbody>
-        </table>
-    </div>
+<div class="an-title">🗓️ Day Distribution</div>
+<div class="chart-card"><h3>Lessons by Day of Week</h3><canvas id="dowChart" style="max-height:160px;"></canvas></div>
 
-    <!-- Calendar Insights -->
-    <div class="section-title">🗓️ Lesson Day Distribution</div>
-    <div class="chart-card" style="margin-bottom:18px;">
-        <h3>Busiest Days of the Week</h3>
-        <canvas id="dowChart" style="max-height:180px;"></canvas>
+<div class="an-title">💵 Financial Summary</div>
+<div class="two-col">
+  <div class="chart-card"><h3>Projections</h3>
+    <div class="proj-box" style="background:linear-gradient(135deg,var(--primary),var(--secondary));color:#fff;">
+      <div class="proj-val">${projected:.2f}</div>
+      <div class="proj-lbl">Projected Next Month</div>
+      <div style="font-size:10px;opacity:.8;margin-top:3px;">3-month rolling average</div>
     </div>
-
-    <!-- Financial -->
-    <div class="section-title">💵 Financial Projections &amp; Balances</div>
-    <div class="two-col">
-        <div class="chart-card">
-            <h3>Projections</h3>
-            <div class="proj-box" style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;">
-                <div class="proj-val">${projected:.2f}</div>
-                <div class="proj-lbl">Projected Revenue — Next Month</div>
-                <div style="font-size:11px;opacity:0.8;margin-top:4px;">3-month rolling average</div>
-            </div>
-            <div class="proj-box" style="background:#d1fae5;">
-                <div class="proj-val" style="color:#065f46;">${total_prepaid:.2f}</div>
-                <div class="proj-lbl" style="color:#065f46;">Total Prepaid Balance</div>
-            </div>
-            <div class="proj-box" style="background:#e0e7ff;">
-                <div class="proj-val" style="color:#3730a3;">{total_credits}</div>
-                <div class="proj-lbl" style="color:#3730a3;">Outstanding Credits</div>
-            </div>
-        </div>
-        <div class="chart-card">
-            <h3>Prepaid Balance by Student</h3>
-            <table>
-                <thead><tr><th>Student</th><th>Prepaid ($)</th><th>Credits</th></tr></thead>
-                <tbody>{prepaid_rows}</tbody>
-            </table>
-        </div>
+    <div class="proj-box" style="background:#d1fae5;">
+      <div class="proj-val" style="color:#065f46;">${total_prepaid:.2f}</div>
+      <div class="proj-lbl" style="color:#065f46;">Total Prepaid Balance</div>
     </div>
-
-    <div style="text-align:center;padding:20px;color:rgba(255,255,255,0.5);font-size:12px;">
-        Data sourced live from studio CSV files
+    <div class="proj-box" style="background:#e0e7ff;">
+      <div class="proj-val" style="color:#3730a3;">{total_credits}</div>
+      <div class="proj-lbl" style="color:#3730a3;">Outstanding Credits</div>
     </div>
+  </div>
+  <div class="chart-card"><h3>Prepaid by Student</h3>
+    <table><thead><tr><th>Student</th><th>Prepaid</th><th>Credits</th></tr></thead><tbody>{prepaid_rows}</tbody></table>
+  </div>
 </div>
 
 <script>
 const D = {chart_json};
-Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+Chart.defaults.font.family = "'Inter',-apple-system,sans-serif";
 Chart.defaults.font.size = 12;
-
-new Chart(document.getElementById('monthlyRevenueChart'), {{
-    type: 'bar',
-    data: {{
-        labels: D.monthlyLabels,
-        datasets: [{{
-            label: 'Revenue',
-            data: D.monthlyValues,
-            backgroundColor: 'rgba(102,126,234,0.75)',
-            borderColor: '#667eea',
-            borderWidth: 2,
-            borderRadius: 8,
-            borderSkipped: false
-        }}]
-    }},
-    options: {{
-        responsive: true,
-        plugins: {{
-            legend: {{ display: false }},
-            tooltip: {{ callbacks: {{ label: ctx => '$' + ctx.parsed.y.toFixed(2) }} }}
-        }},
-        scales: {{ y: {{ beginAtZero: true, ticks: {{ callback: v => '$' + v }} }} }}
-    }}
-}});
-
-new Chart(document.getElementById('studentRevenueChart'), {{
-    type: 'bar',
-    data: {{
-        labels: D.studentLabels,
-        datasets: [{{
-            label: 'Revenue',
-            data: D.studentValues,
-            backgroundColor: ['rgba(102,126,234,0.85)','rgba(118,75,162,0.85)','rgba(34,197,94,0.85)','rgba(59,130,246,0.85)','rgba(245,158,11,0.85)'],
-            borderColor: ['#667eea','#764ba2','#22c55e','#3b82f6','#f59e0b'],
-            borderWidth: 2,
-            borderRadius: 8,
-            borderSkipped: false
-        }}]
-    }},
-    options: {{
-        indexAxis: 'y',
-        responsive: true,
-        plugins: {{
-            legend: {{ display: false }},
-            tooltip: {{ callbacks: {{ label: ctx => '$' + ctx.parsed.x.toFixed(2) }} }}
-        }},
-        scales: {{ x: {{ beginAtZero: true, ticks: {{ callback: v => '$' + v }} }} }}
-    }}
-}});
-
-new Chart(document.getElementById('attendanceDoughnut'), {{
-    type: 'doughnut',
-    data: {{
-        labels: ['Confirmed', 'Missed', 'Cancelled'],
-        datasets: [{{
-            data: D.attValues,
-            backgroundColor: ['rgba(34,197,94,0.85)','rgba(239,68,68,0.85)','rgba(245,158,11,0.85)'],
-            borderColor: ['#22c55e','#ef4444','#f59e0b'],
-            borderWidth: 2
-        }}]
-    }},
-    options: {{
-        responsive: true,
-        cutout: '62%',
-        plugins: {{ legend: {{ position: 'bottom' }} }}
-    }}
-}});
-
-new Chart(document.getElementById('monthlyAttChart'), {{
-    type: 'bar',
-    data: {{
-        labels: D.attMonthLabels,
-        datasets: [
-            {{ label: 'Confirmed', data: D.attMonthConfirmed, backgroundColor: 'rgba(34,197,94,0.8)', borderColor: '#22c55e', borderWidth: 2, borderRadius: 6 }},
-            {{ label: 'Missed',    data: D.attMonthMissed,    backgroundColor: 'rgba(239,68,68,0.8)',  borderColor: '#ef4444', borderWidth: 2, borderRadius: 6 }},
-            {{ label: 'Cancelled', data: D.attMonthCancelled, backgroundColor: 'rgba(245,158,11,0.8)', borderColor: '#f59e0b', borderWidth: 2, borderRadius: 6 }}
-        ]
-    }},
-    options: {{
-        responsive: true,
-        plugins: {{ legend: {{ position: 'bottom' }} }},
-        scales: {{ y: {{ beginAtZero: true, ticks: {{ precision: 0 }} }} }}
-    }}
-}});
-
-new Chart(document.getElementById('dowChart'), {{
-    type: 'bar',
-    data: {{
-        labels: D.dowLabels,
-        datasets: [{{
-            label: 'Lessons',
-            data: D.dowValues,
-            backgroundColor: D.dowColors,
-            borderColor: '#667eea',
-            borderWidth: 2,
-            borderRadius: 8,
-            borderSkipped: false
-        }}]
-    }},
-    options: {{
-        responsive: true,
-        plugins: {{ legend: {{ display: false }} }},
-        scales: {{ y: {{ beginAtZero: true, ticks: {{ precision: 0 }} }} }}
-    }}
-}});
-</script>
-</body>
-</html>""")
+new Chart(document.getElementById('monthlyRevenueChart'),{{type:'bar',data:{{labels:D.monthlyLabels,datasets:[{{label:'Revenue',data:D.monthlyValues,backgroundColor:'rgba(99,102,241,.75)',borderColor:'#6366f1',borderWidth:2,borderRadius:7,borderSkipped:false}}]}},options:{{responsive:true,plugins:{{legend:{{display:false}},tooltip:{{callbacks:{{label:ctx=>'$'+ctx.parsed.y.toFixed(2)}}}}}},scales:{{y:{{beginAtZero:true,ticks:{{callback:v=>'$'+v}}}}}}}}}});
+new Chart(document.getElementById('studentRevenueChart'),{{type:'bar',data:{{labels:D.studentLabels,datasets:[{{label:'Revenue',data:D.studentValues,backgroundColor:['rgba(99,102,241,.85)','rgba(139,92,246,.85)','rgba(16,185,129,.85)','rgba(59,130,246,.85)','rgba(245,158,11,.85)'],borderWidth:2,borderRadius:7,borderSkipped:false}}]}},options:{{indexAxis:'y',responsive:true,plugins:{{legend:{{display:false}},tooltip:{{callbacks:{{label:ctx=>'$'+ctx.parsed.x.toFixed(2)}}}}}},scales:{{x:{{beginAtZero:true,ticks:{{callback:v=>'$'+v}}}}}}}}}});
+new Chart(document.getElementById('attendanceDoughnut'),{{type:'doughnut',data:{{labels:['Confirmed','Missed','Cancelled'],datasets:[{{data:D.attValues,backgroundColor:['rgba(16,185,129,.85)','rgba(239,68,68,.85)','rgba(245,158,11,.85)'],borderColor:['#10b981','#ef4444','#f59e0b'],borderWidth:2}}]}},options:{{responsive:true,cutout:'62%',plugins:{{legend:{{position:'bottom'}}}}}}}});
+new Chart(document.getElementById('monthlyAttChart'),{{type:'bar',data:{{labels:D.attMonthLabels,datasets:[{{label:'Confirmed',data:D.attMonthConfirmed,backgroundColor:'rgba(16,185,129,.8)',borderColor:'#10b981',borderWidth:2,borderRadius:5}},{{label:'Missed',data:D.attMonthMissed,backgroundColor:'rgba(239,68,68,.8)',borderColor:'#ef4444',borderWidth:2,borderRadius:5}},{{label:'Cancelled',data:D.attMonthCancelled,backgroundColor:'rgba(245,158,11,.8)',borderColor:'#f59e0b',borderWidth:2,borderRadius:5}}]}},options:{{responsive:true,plugins:{{legend:{{position:'bottom'}}}},scales:{{y:{{beginAtZero:true,ticks:{{precision:0}}}}}}}}}});
+new Chart(document.getElementById('dowChart'),{{type:'bar',data:{{labels:D.dowLabels,datasets:[{{label:'Lessons',data:D.dowValues,backgroundColor:D.dowColors,borderColor:'#6366f1',borderWidth:2,borderRadius:7,borderSkipped:false}}]}},options:{{responsive:true,plugins:{{legend:{{display:false}}}},scales:{{y:{{beginAtZero:true,ticks:{{precision:0}}}}}}}}}});
+</script>"""
+    return HTMLResponse(page("Analytics", content, "analytics",
+                             extra_head='<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>'))
 
 @app.get("/api/backup")
 def backup_data():
@@ -1550,89 +1406,68 @@ def backup_csv():
 
 @app.get("/admin")
 def admin_panel():
-    """Admin-only backup page"""
-    return HTMLResponse("""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Admin Panel</title>
-        <link rel="stylesheet" href="/static/style.css">
-    </head>
-    <body>
-        <div class="container">
-            <div class="card" style="text-align: center;">
-                <h1>🔐 Admin Panel</h1>
-                <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
-                    <a href="/api/backup" class="btn">📥 Download JSON Backup</a>
-                    <a href="/api/backup/csv" class="btn">📥 Download CSV Backup (ZIP)</a>
-                </div>
-                <p style="margin-top: 20px;"><a href="/dashboard">← Back to Dashboard</a></p>
-            </div>
-        </div>
-    </body>
-    </html>
-    """)
+    content = """
+<div class="card" style="max-width:480px;">
+  <h2>🔐 Admin Panel</h2>
+  <p style="color:var(--muted);margin-bottom:18px;font-size:13px;">Backup and restore your studio data.</p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;">
+    <a href="/api/backup" class="btn">📥 JSON Backup</a>
+    <a href="/api/backup/csv" class="btn btn-outline">📦 CSV Backup (ZIP)</a>
+  </div>
+</div>"""
+    return HTMLResponse(page("Admin", content, "admin"))
 
 
 @app.get("/edit-student/{student_name}")
 def edit_student_page(student_name: str):
-    """Edit student profile page"""
     profiles = get_all_profiles()
     student = profiles.get(student_name)
-
     if not student:
         return RedirectResponse(url="/students", status_code=303)
-
-    return HTMLResponse(f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Edit {student_name}</title>
-        <link rel="stylesheet" href="/static/style.css">
-    </head>
-    <body>
-        <div class="container">
-            <div class="card">
-                <h1>✏️ Edit Student: {student_name}</h1>
-                <form action="/update-student" method="post">
-                    <input type="hidden" name="original_name" value="{student_name}">
-                    <div class="form-group">
-                        <label>Student Name</label>
-                        <input type="text" name="name" value="{student_name}" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Hourly Rate ($)</label>
-                        <input type="number" step="0.01" name="rate" value="{student.get('rate', 50)}" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Credits</label>
-                        <input type="number" name="credits" value="{student.get('credits', 0)}">
-                    </div>
-                    <div class="form-group">
-                        <label>Prepaid Balance ($)</label>
-                        <input type="number" step="0.01" name="prepaid" value="{student.get('prepaid', 0)}">
-                    </div>
-                    <div class="form-group">
-                        <label>Target Minutes (Lesson Length)</label>
-                        <input type="number" name="target_minutes" value="{student.get('target_minutes', 60)}">
-                    </div>
-                    <div class="form-group">
-                        <label>Description / Focus</label>
-                        <input type="text" name="description" value="{student.get('description', '')}">
-                    </div>
-                    <div class="form-group">
-                        <label>Alternative Names (comma separated)</label>
-                        <input type="text" name="aliases" value="{', '.join(student.get('aliases', []))}" placeholder="Jane, Jenny, Becky's Lesson">
-                        <small>These names will also match calendar events</small>
-                    </div>
-                    <button type="submit" class="btn">Save Changes</button>
-                    <a href="/students" class="btn">Cancel</a>
-                </form>
-            </div>
-        </div>
-    </body>
-    </html>
-    """)
+    aliases_str = ', '.join(student.get('aliases', []))
+    content = f"""
+<div class="card" style="max-width:560px;">
+  <h2>✏️ Edit Student: {student_name}</h2>
+  <form action="/update-student" method="post">
+    <input type="hidden" name="original_name" value="{student_name}">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div class="form-group" style="margin:0;">
+        <label class="form-label">Student Name</label>
+        <input type="text" name="name" value="{student_name}" required>
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label class="form-label">Hourly Rate ($)</label>
+        <input type="number" step="0.01" name="rate" value="{student.get('rate', 50)}" required>
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label class="form-label">Lesson Length (min)</label>
+        <input type="number" name="target_minutes" value="{student.get('target_minutes', 60)}">
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label class="form-label">Prepaid Balance ($)</label>
+        <input type="number" step="0.01" name="prepaid" value="{student.get('prepaid', 0)}">
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label class="form-label">Credits</label>
+        <input type="number" name="credits" value="{student.get('credits', 0)}">
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label class="form-label">Focus / Instrument</label>
+        <input type="text" name="description" value="{student.get('description', '')}">
+      </div>
+    </div>
+    <div class="form-group" style="margin-top:12px;">
+      <label class="form-label">Alternative Names (comma separated)</label>
+      <input type="text" name="aliases" value="{aliases_str}" placeholder="e.g. Jane, Jenny">
+      <div style="font-size:11px;color:var(--muted);margin-top:3px;">These names will also match calendar events.</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:6px;">
+      <button type="submit" class="btn">Save Changes</button>
+      <a href="/students" class="btn btn-ghost">Cancel</a>
+    </div>
+  </form>
+</div>"""
+    return HTMLResponse(page(f"Edit — {student_name}", content, "students"))
 
 
 @app.post("/update-student")
@@ -1674,33 +1509,27 @@ def delete_student(student_name: str = Form(...)):
 def settings_page():
     settings = load_calendar_settings()
     keywords = ", ".join(settings.get("lesson_keywords", []))
-    show_all_checked = "checked" if settings.get("show_all", True) else ""
-    return HTMLResponse(f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Calendar Settings</title>
-        <link rel="stylesheet" href="/static/style.css">
-    </head>
-    <body>
-        <div class="container">
-            <div class="card">
-                <h1>⚙️ Calendar Settings</h1>
-                <form action="/settings" method="post">
-                    <label>Lesson Keywords (comma separated)</label>
-                    <textarea name="lesson_keywords" rows="4" style="width:100%; padding:10px; border-radius:8px; border:2px solid #e5e7eb;">{keywords}</textarea>
-                    <label style="display:flex; align-items:center; gap:10px; margin-top:12px;">
-                        <input type="checkbox" name="show_all" value="true" {show_all_checked}>
-                        Show all lesson-like events on the dashboard
-                    </label>
-                    <button type="submit" class="btn">Save Settings</button>
-                    <a href="/dashboard" class="btn">Back</a>
-                </form>
-            </div>
-        </div>
-    </body>
-    </html>
-    """)
+    checked = "checked" if settings.get("show_all", True) else ""
+    content = f"""
+<div class="card" style="max-width:560px;">
+  <h2>⚙️ Calendar Settings</h2>
+  <form action="/settings" method="post">
+    <div class="form-group">
+      <label class="form-label">Lesson Keywords (comma separated)</label>
+      <textarea name="lesson_keywords" rows="3" style="width:100%;padding:9px 11px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;">{keywords}</textarea>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px;">Events matching these words appear on the dashboard as lessons.</div>
+    </div>
+    <div class="form-group" style="display:flex;align-items:center;gap:8px;">
+      <input type="checkbox" name="show_all" value="true" {checked} id="show_all" style="width:auto;">
+      <label for="show_all" style="font-size:13px;font-weight:500;margin:0;cursor:pointer;">Show unregistered lesson-like events on dashboard</label>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:6px;">
+      <button type="submit" class="btn">Save Settings</button>
+      <a href="/calendar-auth" class="btn btn-outline">🔗 Re-connect Calendar</a>
+    </div>
+  </form>
+</div>"""
+    return HTMLResponse(page("Settings", content, "settings"))
 
 
 @app.post("/settings")
@@ -1715,27 +1544,36 @@ def save_settings(lesson_keywords: str = Form(""), show_all: str = Form("false")
 
 @app.get("/revenue")
 def revenue_page():
-    """Display total revenue page"""
     total = calculate_total_revenue()
-    return HTMLResponse(f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Revenue Report</title>
-        <link rel="stylesheet" href="/static/style.css">
-    </head>
-    <body>
-        <div class="container">
-            <div class="card" style="text-align: center;">
-                <h1>💰 Total Revenue</h1>
-                <p style="font-size: 48px; color: #22c55e; font-weight: bold;">${total:.2f}</p>
-                <p>From all recorded payments</p>
-                <a href="/dashboard" class="btn">← Back to Dashboard</a>
-            </div>
-        </div>
-    </body>
-    </html>
-    """)
+    profiles = get_all_profiles()
+    total_prepaid = sum(d.get('prepaid', 0) for d in profiles.values())
+    content = f"""
+<div class="stats-row">
+  <div class="stat-card">
+    <div class="stat-icon" style="background:#d1fae5;">📊</div>
+    <div class="stat-val">${total:.2f}</div>
+    <div class="stat-lbl">Total Revenue</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:#e0e7ff;">💳</div>
+    <div class="stat-val">${total_prepaid:.2f}</div>
+    <div class="stat-lbl">Prepaid on Account</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:#fef3c7;">👥</div>
+    <div class="stat-val">{len(profiles)}</div>
+    <div class="stat-lbl">Active Students</div>
+  </div>
+</div>
+<div class="card" style="text-align:center;padding:40px;">
+  <div style="font-size:56px;font-weight:800;color:var(--success);">${total:.2f}</div>
+  <div style="color:var(--muted);margin-top:8px;">Total revenue from all recorded lessons</div>
+  <div style="margin-top:20px;display:flex;gap:10px;justify-content:center;">
+    <a href="/analytics" class="btn">📈 Full Analytics</a>
+    <a href="/payments" class="btn btn-outline">💳 Record Payment</a>
+  </div>
+</div>"""
+    return HTMLResponse(page("Revenue", content, "revenue"))
 
 
 @app.post("/quick-create-student")
