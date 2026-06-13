@@ -382,6 +382,7 @@ def dashboard(request: Request):
     <head>
         <title>Studio Dashboard</title>
         <link rel="stylesheet" href="/static/style.css">
+        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
         <style>
             .dashboard-grid {{
                 display: grid;
@@ -481,6 +482,11 @@ def dashboard(request: Request):
                     <span class="nav-emoji">📊</span>
                     <div class="nav-title">Revenue</div>
                     <small>View earnings</small>
+                </a>
+                <a href="/analytics" class="nav-card">
+                    <span class="nav-emoji">📈</span>
+                    <div class="nav-title">Analytics</div>
+                    <small>Business insights</small>
                 </a>
                 <a href="/logout" class="nav-card">
                     <span class="nav-emoji">🚪</span>
@@ -872,6 +878,623 @@ def calculate_total_revenue():
                 amount = float(row.get("AmountCharged", 0) or 0)
                 total_revenue += amount
     return total_revenue
+
+
+def compute_analytics():
+    from collections import defaultdict
+
+    now = datetime.now()
+
+    def get_months(n):
+        result = []
+        for i in range(n - 1, -1, -1):
+            m, y = now.month - i, now.year
+            while m <= 0:
+                m += 12
+                y -= 1
+            result.append((y, m))
+        return result
+
+    profiles = get_all_profiles()
+
+    ledger_rows = []
+    ledger_path = LEDGER_FILE if os.path.exists(LEDGER_FILE) else "studio_ledger.csv"
+    if os.path.exists(ledger_path):
+        with open(ledger_path, 'r', newline='') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    row['_date'] = datetime.strptime(row.get('Date', ''), '%Y-%m-%d')
+                except Exception:
+                    row['_date'] = None
+                ledger_rows.append(row)
+
+    six_months = get_months(6)
+    three_months = get_months(3)
+
+    # Revenue per month (net, including corrections)
+    month_rev = defaultdict(float)
+    for row in ledger_rows:
+        if row['_date']:
+            try:
+                month_rev[(row['_date'].year, row['_date'].month)] += float(row.get('AmountCharged', 0) or 0)
+            except Exception:
+                pass
+
+    monthly_revenue = [
+        {'label': datetime(y, m, 1).strftime('%b %Y'), 'rev': round(month_rev.get((y, m), 0), 2)}
+        for y, m in six_months
+    ]
+
+    total_revenue = sum(
+        float(row.get('AmountCharged', 0) or 0)
+        for row in ledger_rows
+        if row.get('AmountCharged')
+    )
+
+    # Revenue by student (positive charges only)
+    student_rev = defaultdict(float)
+    for row in ledger_rows:
+        try:
+            amt = float(row.get('AmountCharged', 0) or 0)
+            if amt > 0:
+                student_rev[row.get('Student', 'Unknown')] += amt
+        except Exception:
+            pass
+    top5 = sorted(student_rev.items(), key=lambda x: x[1], reverse=True)[:5]
+    revenue_by_student = [{'name': n, 'rev': round(r, 2)} for n, r in top5]
+
+    # Revenue by lesson length
+    length_rev = defaultdict(float)
+    for row in ledger_rows:
+        try:
+            amt = float(row.get('AmountCharged', 0) or 0)
+            if amt > 0:
+                mins = profiles.get(row.get('Student', ''), {}).get('target_minutes', 60)
+                key = '30 min' if mins <= 30 else ('45 min' if mins <= 45 else ('60 min' if mins <= 60 else '90+ min'))
+                length_rev[key] += amt
+        except Exception:
+            pass
+
+    # Attendance
+    att = defaultdict(int)
+    for row in ledger_rows:
+        s = row.get('Status', '')
+        if s in ('Confirmed', 'Attended'):
+            att['confirmed'] += 1
+        elif s in ('Missed', 'No-Show'):
+            att['missed'] += 1
+        elif s == 'Cancelled':
+            att['cancelled'] += 1
+    att_total = sum(att.values()) or 1
+    confirmed_pct = round(att['confirmed'] / att_total * 100, 1)
+    missed_pct = round(att['missed'] / att_total * 100, 1)
+    cancelled_pct = round(att['cancelled'] / att_total * 100, 1)
+
+    # Monthly attendance (3 months)
+    mthly_att = defaultdict(lambda: defaultdict(int))
+    for row in ledger_rows:
+        if row['_date']:
+            key = (row['_date'].year, row['_date'].month)
+            s = row.get('Status', '')
+            if s in ('Confirmed', 'Attended'):
+                mthly_att[key]['confirmed'] += 1
+            elif s in ('Missed', 'No-Show'):
+                mthly_att[key]['missed'] += 1
+            elif s == 'Cancelled':
+                mthly_att[key]['cancelled'] += 1
+
+    monthly_att = [
+        {'label': datetime(y, m, 1).strftime('%b %Y'),
+         'confirmed': mthly_att[(y, m)]['confirmed'],
+         'missed': mthly_att[(y, m)]['missed'],
+         'cancelled': mthly_att[(y, m)]['cancelled']}
+        for y, m in three_months
+    ]
+
+    # Student reliability
+    stu_att = defaultdict(lambda: defaultdict(int))
+    for row in ledger_rows:
+        stu = row.get('Student', '')
+        s = row.get('Status', '')
+        if s in ('Confirmed', 'Attended'):
+            stu_att[stu]['c'] += 1
+        elif s in ('Missed', 'No-Show'):
+            stu_att[stu]['m'] += 1
+        elif s == 'Cancelled':
+            stu_att[stu]['x'] += 1
+
+    reliability = []
+    for stu, counts in stu_att.items():
+        total = counts['c'] + counts['m']
+        rate = round(counts['c'] / total * 100, 1) if total > 0 else 100.0
+        reliability.append({
+            'name': stu, 'rate': rate,
+            'confirmed': counts['c'], 'missed': counts['m'], 'cancelled': counts['x']
+        })
+    reliability.sort(key=lambda x: x['rate'], reverse=True)
+
+    # Day of week distribution (confirmed lessons)
+    day_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+    dow = defaultdict(int)
+    for row in ledger_rows:
+        if row['_date'] and row.get('Status', '') in ('Confirmed', 'Attended'):
+            dow[row['_date'].weekday()] += 1
+    dow_data = [{'day': day_names[i], 'count': dow[i]} for i in range(7)]
+
+    # Avg lessons per student
+    lessons_per_stu = defaultdict(int)
+    for row in ledger_rows:
+        if row.get('Status', '') in ('Confirmed', 'Attended'):
+            lessons_per_stu[row.get('Student', '')] += 1
+    avg_lessons = round(sum(lessons_per_stu.values()) / max(len(profiles), 1), 1)
+
+    # Projections (average of last 3 months)
+    last3_rev = sum(month_rev.get(k, 0) for k in three_months)
+    projected = round(last3_rev / 3, 2)
+
+    total_prepaid = round(sum(d.get('prepaid', 0) for d in profiles.values()), 2)
+    total_credits = sum(d.get('credits', 0) for d in profiles.values())
+    prepaid_students = sorted(
+        [{'name': n, 'prepaid': round(d.get('prepaid', 0), 2), 'credits': d.get('credits', 0)}
+         for n, d in profiles.items()],
+        key=lambda x: x['prepaid'], reverse=True
+    )
+
+    return {
+        'monthly_revenue': monthly_revenue,
+        'total_revenue': round(total_revenue, 2),
+        'revenue_by_student': revenue_by_student,
+        'revenue_by_length': dict(length_rev),
+        'att': dict(att),
+        'att_total': att_total,
+        'confirmed_pct': confirmed_pct,
+        'missed_pct': missed_pct,
+        'cancelled_pct': cancelled_pct,
+        'monthly_att': monthly_att,
+        'reliability': reliability,
+        'dow': dow_data,
+        'total_students': len(profiles),
+        'avg_lessons': avg_lessons,
+        'projected': projected,
+        'total_prepaid': total_prepaid,
+        'total_credits': total_credits,
+        'prepaid_students': prepaid_students,
+    }
+
+
+@app.get("/analytics", response_class=HTMLResponse)
+def analytics_page():
+    try:
+        data = compute_analytics()
+    except Exception as e:
+        return HTMLResponse(f"""<!DOCTYPE html><html>
+        <head><title>Analytics Error</title><link rel="stylesheet" href="/static/style.css"></head>
+        <body><div class="container"><div class="card">
+        <h1>⚠️ Analytics Error</h1><p>Could not load analytics: {str(e)}</p>
+        <a href="/dashboard" class="btn">← Back</a>
+        </div></div></body></html>""")
+
+    # Build reliability table rows
+    reliability_rows = ""
+    for r in data['reliability']:
+        bar_w = min(int(r['rate']), 100)
+        reliability_rows += f"""<tr>
+            <td><strong>{r['name']}</strong></td>
+            <td><div style="display:flex;align-items:center;gap:8px;">
+                <div style="width:{bar_w}px;height:8px;border-radius:4px;background:linear-gradient(90deg,#667eea,#764ba2);flex-shrink:0;min-width:4px;"></div>
+                <span>{r['rate']}%</span></div></td>
+            <td style="color:#22c55e;font-weight:700;">{r['confirmed']}</td>
+            <td style="color:#ef4444;font-weight:700;">{r['missed']}</td>
+            <td style="color:#f59e0b;font-weight:700;">{r['cancelled']}</td>
+        </tr>"""
+    if not reliability_rows:
+        reliability_rows = '<tr><td colspan="5" style="text-align:center;color:#888;padding:20px;">No attendance data yet</td></tr>'
+
+    # Build prepaid table rows
+    prepaid_rows = ""
+    for s in data['prepaid_students']:
+        prepaid_rows += f"""<tr>
+            <td><strong>{s['name']}</strong></td>
+            <td style="color:#065f46;font-weight:700;">${s['prepaid']:.2f}</td>
+            <td style="color:#3730a3;font-weight:700;">{s['credits']}</td>
+        </tr>"""
+    if not prepaid_rows:
+        prepaid_rows = '<tr><td colspan="3" style="text-align:center;color:#888;padding:20px;">No prepaid balances</td></tr>'
+
+    # Build length revenue rows
+    length_rows = ""
+    for length, rev in sorted(data['revenue_by_length'].items()):
+        length_rows += f'<tr><td><strong>{length}</strong></td><td style="color:#22c55e;font-weight:700;">${rev:.2f}</td></tr>'
+    if not length_rows:
+        length_rows = '<tr><td colspan="2" style="text-align:center;color:#888;padding:20px;">No data yet</td></tr>'
+
+    # Pre-compute DOW colors in Python (avoids JS template literals in f-string)
+    dow_max = max((d['count'] for d in data['dow']), default=1) or 1
+    dow_colors_list = [
+        f"rgba(102, 126, 234, {0.3 + (d['count'] / dow_max) * 0.7:.2f})"
+        for d in data['dow']
+    ]
+
+    chart_json = json.dumps({
+        'monthlyLabels': [m['label'] for m in data['monthly_revenue']],
+        'monthlyValues': [m['rev'] for m in data['monthly_revenue']],
+        'studentLabels': [s['name'] for s in data['revenue_by_student']],
+        'studentValues': [s['rev'] for s in data['revenue_by_student']],
+        'attValues': [data['att'].get('confirmed', 0), data['att'].get('missed', 0), data['att'].get('cancelled', 0)],
+        'attMonthLabels': [m['label'] for m in data['monthly_att']],
+        'attMonthConfirmed': [m['confirmed'] for m in data['monthly_att']],
+        'attMonthMissed': [m['missed'] for m in data['monthly_att']],
+        'attMonthCancelled': [m['cancelled'] for m in data['monthly_att']],
+        'dowLabels': [d['day'] for d in data['dow']],
+        'dowValues': [d['count'] for d in data['dow']],
+        'dowColors': dow_colors_list,
+    })
+
+    total_revenue = data['total_revenue']
+    total_students = data['total_students']
+    avg_lessons = data['avg_lessons']
+    projected = data['projected']
+    confirmed_pct = data['confirmed_pct']
+    missed_pct = data['missed_pct']
+    cancelled_pct = data['cancelled_pct']
+    total_prepaid = data['total_prepaid']
+    total_credits = data['total_credits']
+
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Analytics Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        .kpi-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+            gap: 18px;
+            margin-bottom: 24px;
+        }}
+        .kpi-card {{
+            background: white;
+            border-radius: 20px;
+            padding: 24px 20px;
+            text-align: center;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+        }}
+        .kpi-value {{
+            font-size: 34px;
+            font-weight: 800;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            line-height: 1.2;
+        }}
+        .kpi-label {{
+            color: #777;
+            font-size: 12px;
+            font-weight: 700;
+            margin-top: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+        }}
+        .section-title {{
+            font-size: 20px;
+            font-weight: 700;
+            color: rgba(255,255,255,0.95);
+            margin: 28px 0 14px 0;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }}
+        .chart-card {{
+            background: white;
+            border-radius: 24px;
+            padding: 24px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.08);
+        }}
+        .chart-card h3 {{
+            margin: 0 0 18px 0;
+            color: #222;
+            font-size: 15px;
+            font-weight: 700;
+            letter-spacing: 0.2px;
+        }}
+        .two-col {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 18px;
+            margin-bottom: 18px;
+        }}
+        .three-col {{
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 18px;
+            margin-bottom: 18px;
+        }}
+        @media (max-width: 900px) {{
+            .two-col, .three-col {{ grid-template-columns: 1fr; }}
+        }}
+        @media (max-width: 480px) {{
+            .kpi-value {{ font-size: 26px; }}
+        }}
+        table {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
+        th {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 10px 14px;
+            text-align: left;
+            font-size: 13px;
+        }}
+        th:first-child {{ border-radius: 10px 0 0 0; }}
+        th:last-child {{ border-radius: 0 10px 0 0; }}
+        td {{ padding: 10px 14px; border-bottom: 1px solid #f2f0f7; }}
+        tr:last-child td {{ border-bottom: none; }}
+        tr:hover td {{ background: #faf9ff; }}
+        .proj-box {{
+            border-radius: 16px;
+            padding: 18px 20px;
+            text-align: center;
+            margin-bottom: 12px;
+        }}
+        .proj-val {{
+            font-size: 30px;
+            font-weight: 800;
+            line-height: 1.1;
+        }}
+        .proj-lbl {{
+            font-size: 13px;
+            font-weight: 600;
+            margin-top: 6px;
+        }}
+        .att-legend {{
+            display: flex;
+            justify-content: center;
+            gap: 18px;
+            margin-top: 14px;
+            flex-wrap: wrap;
+            font-size: 13px;
+            font-weight: 600;
+        }}
+    </style>
+</head>
+<body>
+<div class="container">
+
+    <div class="card" style="text-align:center; margin-bottom:24px;">
+        <h1>📊 Analytics Dashboard</h1>
+        <p style="color:#888; margin:4px 0 16px;">Real-time business insights for your studio</p>
+        <a href="/dashboard" class="btn">← Dashboard</a>
+    </div>
+
+    <!-- KPI Row -->
+    <div class="kpi-grid">
+        <div class="kpi-card">
+            <div class="kpi-value">${total_revenue:.2f}</div>
+            <div class="kpi-label">Total Revenue</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-value">{total_students}</div>
+            <div class="kpi-label">Active Students</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-value">{avg_lessons}</div>
+            <div class="kpi-label">Avg Lessons / Student</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-value">{confirmed_pct}%</div>
+            <div class="kpi-label">Attendance Rate</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-value">${projected:.2f}</div>
+            <div class="kpi-label">Projected Next Month</div>
+        </div>
+    </div>
+
+    <!-- Revenue -->
+    <div class="section-title">💰 Revenue Analytics</div>
+    <div class="two-col">
+        <div class="chart-card">
+            <h3>Monthly Revenue — Last 6 Months</h3>
+            <canvas id="monthlyRevenueChart"></canvas>
+        </div>
+        <div class="chart-card">
+            <h3>Revenue by Student (Top 5)</h3>
+            <canvas id="studentRevenueChart"></canvas>
+        </div>
+    </div>
+    <div class="two-col" style="margin-bottom:0;">
+        <div class="chart-card">
+            <h3>Revenue by Lesson Length</h3>
+            <table>
+                <thead><tr><th>Lesson Type</th><th>Revenue</th></tr></thead>
+                <tbody>{length_rows}</tbody>
+            </table>
+        </div>
+        <div class="chart-card">
+            <h3>Revenue Summary</h3>
+            <table>
+                <thead><tr><th>Student</th><th>Revenue</th></tr></thead>
+                <tbody>{''.join(f'<tr><td><strong>{s["name"]}</strong></td><td style="color:#22c55e;font-weight:700;">${s["rev"]:.2f}</td></tr>' for s in data['revenue_by_student']) or '<tr><td colspan="2" style="text-align:center;color:#888;padding:20px;">No revenue data yet</td></tr>'}</tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Attendance -->
+    <div class="section-title">📅 Attendance Analytics</div>
+    <div class="two-col">
+        <div class="chart-card">
+            <h3>Overall Attendance Breakdown</h3>
+            <canvas id="attendanceDoughnut" style="max-height:260px;"></canvas>
+            <div class="att-legend">
+                <span style="color:#22c55e;">✅ Confirmed {confirmed_pct}%</span>
+                <span style="color:#ef4444;">❌ Missed {missed_pct}%</span>
+                <span style="color:#f59e0b;">🔄 Cancelled {cancelled_pct}%</span>
+            </div>
+        </div>
+        <div class="chart-card">
+            <h3>Monthly Attendance Trend (3 Months)</h3>
+            <canvas id="monthlyAttChart"></canvas>
+        </div>
+    </div>
+
+    <div class="chart-card" style="margin-bottom:18px;">
+        <h3>Student Reliability</h3>
+        <table>
+            <thead><tr><th>Student</th><th>Attendance Rate</th><th>✅ Confirmed</th><th>❌ Missed</th><th>🔄 Cancelled</th></tr></thead>
+            <tbody>{reliability_rows}</tbody>
+        </table>
+    </div>
+
+    <!-- Calendar Insights -->
+    <div class="section-title">🗓️ Lesson Day Distribution</div>
+    <div class="chart-card" style="margin-bottom:18px;">
+        <h3>Busiest Days of the Week</h3>
+        <canvas id="dowChart" style="max-height:180px;"></canvas>
+    </div>
+
+    <!-- Financial -->
+    <div class="section-title">💵 Financial Projections &amp; Balances</div>
+    <div class="two-col">
+        <div class="chart-card">
+            <h3>Projections</h3>
+            <div class="proj-box" style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;">
+                <div class="proj-val">${projected:.2f}</div>
+                <div class="proj-lbl">Projected Revenue — Next Month</div>
+                <div style="font-size:11px;opacity:0.8;margin-top:4px;">3-month rolling average</div>
+            </div>
+            <div class="proj-box" style="background:#d1fae5;">
+                <div class="proj-val" style="color:#065f46;">${total_prepaid:.2f}</div>
+                <div class="proj-lbl" style="color:#065f46;">Total Prepaid Balance</div>
+            </div>
+            <div class="proj-box" style="background:#e0e7ff;">
+                <div class="proj-val" style="color:#3730a3;">{total_credits}</div>
+                <div class="proj-lbl" style="color:#3730a3;">Outstanding Credits</div>
+            </div>
+        </div>
+        <div class="chart-card">
+            <h3>Prepaid Balance by Student</h3>
+            <table>
+                <thead><tr><th>Student</th><th>Prepaid ($)</th><th>Credits</th></tr></thead>
+                <tbody>{prepaid_rows}</tbody>
+            </table>
+        </div>
+    </div>
+
+    <div style="text-align:center;padding:20px;color:rgba(255,255,255,0.5);font-size:12px;">
+        Data sourced live from studio CSV files
+    </div>
+</div>
+
+<script>
+const D = {chart_json};
+Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+Chart.defaults.font.size = 12;
+
+new Chart(document.getElementById('monthlyRevenueChart'), {{
+    type: 'bar',
+    data: {{
+        labels: D.monthlyLabels,
+        datasets: [{{
+            label: 'Revenue',
+            data: D.monthlyValues,
+            backgroundColor: 'rgba(102,126,234,0.75)',
+            borderColor: '#667eea',
+            borderWidth: 2,
+            borderRadius: 8,
+            borderSkipped: false
+        }}]
+    }},
+    options: {{
+        responsive: true,
+        plugins: {{
+            legend: {{ display: false }},
+            tooltip: {{ callbacks: {{ label: ctx => '$' + ctx.parsed.y.toFixed(2) }} }}
+        }},
+        scales: {{ y: {{ beginAtZero: true, ticks: {{ callback: v => '$' + v }} }} }}
+    }}
+}});
+
+new Chart(document.getElementById('studentRevenueChart'), {{
+    type: 'bar',
+    data: {{
+        labels: D.studentLabels,
+        datasets: [{{
+            label: 'Revenue',
+            data: D.studentValues,
+            backgroundColor: ['rgba(102,126,234,0.85)','rgba(118,75,162,0.85)','rgba(34,197,94,0.85)','rgba(59,130,246,0.85)','rgba(245,158,11,0.85)'],
+            borderColor: ['#667eea','#764ba2','#22c55e','#3b82f6','#f59e0b'],
+            borderWidth: 2,
+            borderRadius: 8,
+            borderSkipped: false
+        }}]
+    }},
+    options: {{
+        indexAxis: 'y',
+        responsive: true,
+        plugins: {{
+            legend: {{ display: false }},
+            tooltip: {{ callbacks: {{ label: ctx => '$' + ctx.parsed.x.toFixed(2) }} }}
+        }},
+        scales: {{ x: {{ beginAtZero: true, ticks: {{ callback: v => '$' + v }} }} }}
+    }}
+}});
+
+new Chart(document.getElementById('attendanceDoughnut'), {{
+    type: 'doughnut',
+    data: {{
+        labels: ['Confirmed', 'Missed', 'Cancelled'],
+        datasets: [{{
+            data: D.attValues,
+            backgroundColor: ['rgba(34,197,94,0.85)','rgba(239,68,68,0.85)','rgba(245,158,11,0.85)'],
+            borderColor: ['#22c55e','#ef4444','#f59e0b'],
+            borderWidth: 2
+        }}]
+    }},
+    options: {{
+        responsive: true,
+        cutout: '62%',
+        plugins: {{ legend: {{ position: 'bottom' }} }}
+    }}
+}});
+
+new Chart(document.getElementById('monthlyAttChart'), {{
+    type: 'bar',
+    data: {{
+        labels: D.attMonthLabels,
+        datasets: [
+            {{ label: 'Confirmed', data: D.attMonthConfirmed, backgroundColor: 'rgba(34,197,94,0.8)', borderColor: '#22c55e', borderWidth: 2, borderRadius: 6 }},
+            {{ label: 'Missed',    data: D.attMonthMissed,    backgroundColor: 'rgba(239,68,68,0.8)',  borderColor: '#ef4444', borderWidth: 2, borderRadius: 6 }},
+            {{ label: 'Cancelled', data: D.attMonthCancelled, backgroundColor: 'rgba(245,158,11,0.8)', borderColor: '#f59e0b', borderWidth: 2, borderRadius: 6 }}
+        ]
+    }},
+    options: {{
+        responsive: true,
+        plugins: {{ legend: {{ position: 'bottom' }} }},
+        scales: {{ y: {{ beginAtZero: true, ticks: {{ precision: 0 }} }} }}
+    }}
+}});
+
+new Chart(document.getElementById('dowChart'), {{
+    type: 'bar',
+    data: {{
+        labels: D.dowLabels,
+        datasets: [{{
+            label: 'Lessons',
+            data: D.dowValues,
+            backgroundColor: D.dowColors,
+            borderColor: '#667eea',
+            borderWidth: 2,
+            borderRadius: 8,
+            borderSkipped: false
+        }}]
+    }},
+    options: {{
+        responsive: true,
+        plugins: {{ legend: {{ display: false }} }},
+        scales: {{ y: {{ beginAtZero: true, ticks: {{ precision: 0 }} }} }}
+    }}
+}});
+</script>
+</body>
+</html>""")
 
 @app.get("/api/backup")
 def backup_data():
