@@ -1635,6 +1635,12 @@ def quick_create_student(student_name: str = Form(...), duration_minutes: int = 
     return RedirectResponse(url="/dashboard", status_code=303)
 
 
+@app.get("/static/style.css")
+def serve_css():
+    """Serve the CSS file"""
+    return Response(content=css_content, media_type="text/css")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
