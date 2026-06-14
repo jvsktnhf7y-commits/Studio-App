@@ -137,12 +137,40 @@ HALF_CHARGE_STATUSES = frozenset(['Completed (Half Rate)'])
 # Rate limiter dictionary to prevent rapid repeated clicks
 rate_limit = {}
 
-# Password file
+# Password file (kept for backward compat — admin hash is also seeded into users.csv)
 PASSWORD_FILE = "/data/admin_password.json"
 if not os.path.exists(PASSWORD_FILE):
     default_hash = hashlib.sha256("studio2025".encode()).hexdigest()
     with open(PASSWORD_FILE, 'w') as f:
         json.dump({"password_hash": default_hash}, f)
+
+# Users CSV
+USERS_FILE    = "/data/users.csv"
+USER_HEADERS  = ["id", "name", "email", "password_hash", "is_beta_tester", "is_admin", "created_at"]
+
+def _seed_users_file():
+    """Create users.csv with the admin account if it doesn't exist or is empty."""
+    needs_seed = not os.path.exists(USERS_FILE)
+    if not needs_seed:
+        with open(USERS_FILE, 'r') as _f:
+            needs_seed = sum(1 for _ in _f) <= 1   # header-only or empty
+    if not needs_seed:
+        return
+    admin_hash = hashlib.sha256("studio2025".encode()).hexdigest()
+    if os.path.exists(PASSWORD_FILE):
+        try:
+            with open(PASSWORD_FILE, 'r') as _f:
+                admin_hash = json.load(_f).get("password_hash", admin_hash)
+        except Exception:
+            pass
+    with open(USERS_FILE, 'w', newline='') as _f:
+        _w = csv.DictWriter(_f, fieldnames=USER_HEADERS)
+        _w.writeheader()
+        _w.writerow({"id": "1", "name": "Admin", "email": "admin",
+                     "password_hash": admin_hash, "is_beta_tester": "false",
+                     "is_admin": "true", "created_at": datetime.now().strftime('%Y-%m-%d')})
+
+_seed_users_file()
 
 if not os.path.exists(LEDGER_FILE):
     with open(LEDGER_FILE, 'w', newline='') as f:
@@ -164,6 +192,61 @@ def _safe_float(value):
     except (ValueError, TypeError):
         return 0.0
 
+
+# ─── User management helpers ──────────────────────────────────────────────────
+
+def get_all_users():
+    rows = []
+    if os.path.exists(USERS_FILE):
+        with open(USERS_FILE, 'r') as f:
+            for row in csv.DictReader(f):
+                rows.append(dict(row))
+    return rows
+
+
+def save_all_users(users):
+    with open(USERS_FILE, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=USER_HEADERS)
+        writer.writeheader()
+        for u in users:
+            writer.writerow({k: u.get(k, '') for k in USER_HEADERS})
+
+
+def get_user_by_email(email: str):
+    email = email.strip().lower()
+    return next((u for u in get_all_users() if u.get('email', '').lower() == email), None)
+
+
+def create_user(name: str, email: str, password: str, is_beta: bool = True) -> dict:
+    users  = get_all_users()
+    new_id = max((int(u.get('id', 0)) for u in users), default=0) + 1
+    user   = {
+        "id": str(new_id),
+        "name": name.strip(),
+        "email": email.strip().lower(),
+        "password_hash": hashlib.sha256(password.encode()).hexdigest(),
+        "is_beta_tester": "true" if is_beta else "false",
+        "is_admin": "false",
+        "created_at": datetime.now().strftime('%Y-%m-%d'),
+    }
+    users.append(user)
+    save_all_users(users)
+    return user
+
+
+def get_session_user(request: Request):
+    """Return the user dict for the current session, or None."""
+    identifier = _url_decode(request.cookies.get("session", ""))
+    if not identifier:
+        return None
+    return get_user_by_email(identifier)
+
+
+def is_admin_user(request: Request) -> bool:
+    user = get_session_user(request)
+    return bool(user and user.get('is_admin') == 'true')
+
+
 def page(title: str, content: str, active: str = "dashboard", extra_head: str = "") -> str:
     links = [
         ("dashboard", "/dashboard", "🏠", "Dashboard"),
@@ -176,6 +259,7 @@ def page(title: str, content: str, active: str = "dashboard", extra_head: str = 
         ("analytics", "/analytics", "📈", "Analytics"),
         ("settings",  "/settings",  "⚙️",  "Settings"),
         ("admin",     "/admin",     "🔐", "Admin"),
+        ("users",     "/admin/users", "👤", "Users"),
         ("notes",     "/admin/lesson-notes", "📝", "Lesson Notes"),
         ("cancels",   "/admin/blocked-dates", "🚫", "Cancellations"),
     ]
@@ -281,6 +365,74 @@ def student_page(title: str, content: str, student_name: str, active: str = "das
     </div>
     <div class="topbar-right">
       <span style="font-size:12px;color:var(--muted);padding:4px 10px;background:var(--bg);border-radius:20px;">🎵 Student Portal</span>
+    </div>
+  </header>
+  <div class="page-body">
+    {content}
+  </div>
+</div>
+</div>
+<script>
+function openSidebar(){{document.getElementById('sidebar').classList.add('open');document.getElementById('overlay').classList.add('open');}}
+function closeSidebar(){{document.getElementById('sidebar').classList.remove('open');document.getElementById('overlay').classList.remove('open');}}
+</script>
+</body>
+</html>"""
+
+
+def beta_page(title: str, content: str, user_name: str, active: str = "dashboard") -> str:
+    """Simplified layout for beta testers — no admin nav items."""
+    links = [
+        ("dashboard", "/dashboard", "🏠", "Dashboard"),
+    ]
+    nav_html = ""
+    for k, href, icon, label in links:
+        cls = "nav-link active" if k == active else "nav-link"
+        nav_html += f'<a href="{href}" class="{cls}"><span class="nav-icon">{icon}</span>{label}</a>\n'
+    initials = "".join(p[0].upper() for p in user_name.split()[:2]) or "B"
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title} — Studio Beta</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+:root{{--primary:#0891b2;--primary-dark:#0e7490;--secondary:#06b6d4;}}
+.sidebar{{background:#0c4a6e;}}
+.nav-link.active{{background:linear-gradient(135deg,#0891b2,#06b6d4);box-shadow:0 2px 8px rgba(8,145,178,.4);}}
+</style>
+</head>
+<body>
+<div class="sidebar-overlay" id="overlay" onclick="closeSidebar()"></div>
+<div class="layout">
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <div class="brand-icon" style="background:linear-gradient(135deg,#0891b2,#06b6d4);font-size:14px;font-weight:800;">{initials}</div>
+    <div>
+      <div class="brand-name">{user_name}</div>
+      <div class="brand-sub" style="color:#f59e0b;font-weight:700;">BETA TESTER</div>
+    </div>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-group">
+      <div class="nav-group-label">Navigation</div>
+      {nav_html}
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a href="/logout" class="nav-link"><span class="nav-icon">🚪</span>Logout</a>
+  </div>
+</aside>
+<div class="main">
+  <header class="topbar">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <button class="menu-btn" onclick="openSidebar()">☰</button>
+      <span class="topbar-title">{title}</span>
+    </div>
+    <div class="topbar-right">
+      <span style="font-size:11px;font-weight:700;padding:3px 10px;background:#fef3c7;color:#92400e;border-radius:20px;border:1px solid #fde68a;">🧪 BETA</span>
     </div>
   </header>
   <div class="page-body">
@@ -544,7 +696,58 @@ def matches_student(event_title, student_name, student_aliases):
 
 # Dashboard
 @app.get("/dashboard", response_class=HTMLResponse)
-def dashboard(request: Request):
+def dashboard(request: Request, notice: str = ""):
+    user = get_session_user(request)
+    admin = user and user.get('is_admin') == 'true'
+
+    # ── Beta tester view ──────────────────────────────────────────────────────
+    if not admin:
+        user_name = user.get('name', 'Beta Tester') if user else 'Beta Tester'
+        profiles  = get_all_profiles()
+        total_prepaid = sum(d.get('prepaid', 0) for d in profiles.values())
+        total_revenue = calculate_total_revenue()
+        beta_content = f"""
+<div class="alert alert-warning" style="margin-bottom:18px;">
+  🧪 <strong>Beta Tester Mode</strong> — You have read-only access to the studio dashboard.
+  Management features are reserved for the admin account.
+</div>
+<div class="stats-row">
+  <div class="stat-card"><div class="stat-icon" style="background:#ede9fe;">👥</div>
+    <div class="stat-val">{len(profiles)}</div><div class="stat-lbl">Students</div></div>
+  <div class="stat-card"><div class="stat-icon" style="background:#d1fae5;">📊</div>
+    <div class="stat-val">${total_revenue:.0f}</div><div class="stat-lbl">Total Revenue</div></div>
+  <div class="stat-card"><div class="stat-icon" style="background:#e0e7ff;">💳</div>
+    <div class="stat-val">${total_prepaid:.0f}</div><div class="stat-lbl">Prepaid Balance</div></div>
+</div>
+<div class="two-col">
+  <div class="card">
+    <h3 class="card-title" style="margin-bottom:14px;">🎵 What You Can Try</h3>
+    <div style="display:flex;flex-direction:column;gap:10px;font-size:13px;">
+      <a href="/parent/login" class="btn btn-outline" style="justify-content:flex-start;">
+        👨‍👩‍👧 Parent Portal — manage lessons &amp; billing
+      </a>
+      <a href="/student/login" class="btn btn-outline" style="justify-content:flex-start;">
+        🎓 Student Portal — view lessons &amp; balance
+      </a>
+    </div>
+  </div>
+  <div class="card">
+    <h3 class="card-title" style="margin-bottom:14px;">👤 Your Account</h3>
+    <div style="font-size:13px;line-height:2;">
+      <div><span style="color:var(--muted);">Name:</span> <strong>{user_name}</strong></div>
+      <div><span style="color:var(--muted);">Email:</span> {user.get('email','') if user else ''}</div>
+      <div><span style="color:var(--muted);">Role:</span> <span class="badge badge-warning">Beta Tester</span></div>
+      <div><span style="color:var(--muted);">Joined:</span> {user.get('created_at','') if user else ''}</div>
+    </div>
+  </div>
+</div>"""
+        return HTMLResponse(beta_page(f"Welcome, {user_name}!", beta_content, user_name))
+
+    # ── Admin view (full dashboard) ───────────────────────────────────────────
+    notice_html = ""
+    if notice == "admin_only":
+        notice_html = '<div class="alert alert-warning" style="margin-bottom:16px;">⚠️ That page is restricted to admin users.</div>'
+
     existing_students = get_all_profiles()
     settings = load_calendar_settings()
     show_all = True
@@ -716,7 +919,7 @@ def dashboard(request: Request):
     mode_tip     = "Switch to Simple Mode" if mode == "detailed" else "Switch to Detailed Mode"
     mode_badge   = f'<span style="font-size:10px;padding:2px 7px;border-radius:10px;background:{"#e0e7ff" if mode=="detailed" else "#f1f5f9"};color:{"#3730a3" if mode=="detailed" else "var(--muted)"};">{"DETAILED" if mode=="detailed" else "SIMPLE"}</span>'
 
-    content = f"""
+    content = f"""{notice_html}
 <div class="stats-row">
   <div class="stat-card">
     <div class="stat-icon" style="background:#ede9fe;">👥</div>
@@ -778,8 +981,9 @@ def toggle_dashboard_mode(request: Request):
 
 # Login
 @app.get("/login", response_class=HTMLResponse)
-def login_page(error: str = ""):
-    err = f'<div class="alert alert-danger">{error}</div>' if error else ''
+def login_page(error: str = "", success: str = ""):
+    err  = f'<div class="alert alert-danger">{error}</div>'   if error   else ''
+    succ = f'<div class="alert alert-success">{success}</div>' if success else ''
     return HTMLResponse(f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -795,19 +999,22 @@ def login_page(error: str = ""):
     <div class="login-logo">🎵</div>
     <h1 style="text-align:center;margin-bottom:4px;">Studio Console</h1>
     <p style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:22px;">Sign in to your account</p>
-    {err}
+    {err}{succ}
     <form action="/login" method="post">
       <div class="form-group">
-        <label class="form-label">Username</label>
-        <input type="text" name="username" placeholder="admin" required>
+        <label class="form-label">Email / Username</label>
+        <input type="text" name="email" placeholder="admin or your email" required autocomplete="username">
       </div>
       <div class="form-group">
         <label class="form-label">Password</label>
-        <input type="password" name="password" placeholder="••••••••" required>
+        <input type="password" name="password" placeholder="••••••••" required autocomplete="current-password">
       </div>
       <button type="submit" class="btn" style="width:100%;justify-content:center;margin-top:4px;">Sign In</button>
     </form>
-    <div style="margin-top:24px;padding-top:18px;border-top:1px solid var(--border);text-align:center;display:flex;gap:16px;justify-content:center;">
+    <div style="margin-top:14px;text-align:center;">
+      <a href="/signup" style="font-size:12px;color:var(--primary);">Join the beta — create account →</a>
+    </div>
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);text-align:center;display:flex;gap:16px;justify-content:center;">
       <a href="/student/login" style="font-size:12px;color:var(--muted);">Student portal →</a>
       <a href="/parent/login" style="font-size:12px;color:#7c3aed;">Parent portal →</a>
     </div>
@@ -816,17 +1023,23 @@ def login_page(error: str = ""):
 </body>
 </html>""")
 
+
 @app.post("/login")
-def login_post(username: str = Form(...), password: str = Form(...)):
-    if username == "admin":
-        input_hash = hashlib.sha256(password.encode()).hexdigest()
-        with open(PASSWORD_FILE, 'r') as f:
-            data = json.load(f)
-            if input_hash == data.get("password_hash", ""):
-                response = RedirectResponse(url="/dashboard", status_code=303)
-                response.set_cookie(key="session", value="authenticated", httponly=True, max_age=86400)
-                return response
-    return RedirectResponse(url="/login?error=Invalid credentials", status_code=303)
+def login_post(email: str = Form(...), password: str = Form(...)):
+    email = email.strip().lower()
+    pw_hash = hashlib.sha256(password.encode()).hexdigest()
+    user = get_user_by_email(email)
+    if user and user.get('password_hash') == pw_hash:
+        response = RedirectResponse(url="/dashboard", status_code=303)
+        response.set_cookie(
+            key="session",
+            value=_url_encode(user['email'], safe=""),
+            httponly=True,
+            max_age=86400 * 30,
+        )
+        return response
+    return RedirectResponse(url="/login?error=Invalid+email+or+password", status_code=303)
+
 
 @app.get("/logout")
 def logout():
@@ -834,9 +1047,97 @@ def logout():
     response.delete_cookie("session")
     return response
 
+@app.get("/signup", response_class=HTMLResponse)
+def signup_page(error: str = ""):
+    err = f'<div class="alert alert-danger">{error}</div>' if error else ''
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Join Beta — Studio Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card" style="max-width:420px;">
+    <div class="login-logo" style="background:linear-gradient(135deg,#0891b2,#06b6d4);">🧪</div>
+    <h1 style="text-align:center;margin-bottom:4px;">Join the Beta</h1>
+    <p style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:8px;">Create a free beta tester account</p>
+    <div style="text-align:center;margin-bottom:20px;">
+      <span style="font-size:11px;font-weight:700;padding:3px 10px;background:#fef3c7;color:#92400e;border-radius:20px;border:1px solid #fde68a;">🧪 BETA — Free Access</span>
+    </div>
+    {err}
+    <form action="/signup" method="post">
+      <div class="form-group">
+        <label class="form-label">Full Name</label>
+        <input type="text" name="name" placeholder="Your name" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email Address</label>
+        <input type="email" name="email" placeholder="you@email.com" required autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input type="password" name="password" placeholder="At least 8 characters" required minlength="8" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Confirm Password</label>
+        <input type="password" name="confirm_password" placeholder="Repeat password" required autocomplete="new-password">
+      </div>
+      <button type="submit" class="btn" style="width:100%;justify-content:center;background:linear-gradient(135deg,#0891b2,#06b6d4);">
+        Create Beta Account
+      </button>
+    </form>
+    <div style="margin-top:16px;text-align:center;border-top:1px solid var(--border);padding-top:14px;">
+      <a href="/login" style="font-size:12px;color:var(--muted);">Already have an account? Sign in →</a>
+    </div>
+  </div>
+</div>
+</body>
+</html>""")
+
+
+@app.post("/signup")
+def signup_post(name: str = Form(...), email: str = Form(...), password: str = Form(...), confirm_password: str = Form(...)):
+    email = email.strip().lower()
+
+    if password != confirm_password:
+        return RedirectResponse(url="/signup?error=Passwords+do+not+match", status_code=303)
+    if len(password) < 8:
+        return RedirectResponse(url="/signup?error=Password+must+be+at+least+8+characters", status_code=303)
+    if get_user_by_email(email):
+        return RedirectResponse(url="/signup?error=Email+already+registered", status_code=303)
+
+    user = create_user(name=name, email=email, password=password, is_beta=True)
+    response = RedirectResponse(url="/dashboard", status_code=303)
+    response.set_cookie(
+        key="session",
+        value=_url_encode(user['email'], safe=""),
+        httponly=True,
+        max_age=86400 * 30,
+    )
+    return response
+
+
 @app.get("/")
 def root():
     return RedirectResponse(url="/dashboard", status_code=303)
+
+# Routes only admins may visit; beta testers get redirected to /dashboard
+_ADMIN_ONLY_PATHS = frozenset([
+    '/students', '/rates', '/payments', '/invoices', '/schedule',
+    '/revenue', '/analytics', '/settings',
+])
+_ADMIN_ONLY_PREFIXES = (
+    '/admin', '/add-profile', '/edit-student', '/update-student',
+    '/delete-student', '/save-pricing-tier', '/record-payment',
+    '/generate-invoices', '/mark-invoice-paid', '/create-lesson',
+    '/log-attendance', '/quick-create-student', '/api/',
+    '/calendar-auth', '/calendar-callback', '/calendar-events',
+    '/debug-calendar',
+)
 
 # Auth middleware
 @app.middleware("http")
@@ -863,12 +1164,28 @@ async def auth_middleware(request: Request, call_next):
             return await call_next(request)
         return RedirectResponse(url="/parent/login", status_code=303)
 
-    # Admin routes: own login/logout always public
-    if path in ["/login", "/logout"]:
+    # Public admin-side paths (login, signup, test)
+    if path in ["/login", "/logout", "/signup", "/test"]:
         return await call_next(request)
-    if request.cookies.get("session") == "authenticated":
-        return await call_next(request)
-    return RedirectResponse(url="/login", status_code=303)
+
+    # Validate session cookie → must be a real user in users.csv
+    identifier = _url_decode(request.cookies.get("session", ""))
+    if not identifier:
+        return RedirectResponse(url="/login", status_code=303)
+
+    user = get_user_by_email(identifier)
+    if not user:
+        resp = RedirectResponse(url="/login", status_code=303)
+        resp.delete_cookie("session")
+        return resp
+
+    # Admin-only route guard: redirect beta testers politely
+    admin = user.get('is_admin') == 'true'
+    if not admin:
+        if path in _ADMIN_ONLY_PATHS or any(path.startswith(p) for p in _ADMIN_ONLY_PREFIXES):
+            return RedirectResponse(url="/dashboard?notice=admin_only", status_code=303)
+
+    return await call_next(request)
 
 # Students page
 @app.get("/students", response_class=HTMLResponse)
@@ -1682,24 +1999,110 @@ def admin_panel():
     </div>
   </div>
   <div class="card">
+    <h2>👤 User Management</h2>
+    <p style="color:var(--muted);margin-bottom:18px;font-size:13px;">View beta testers, promote users, or remove accounts.</p>
+    <a href="/admin/users" class="btn">👤 Manage Users</a>
+  </div>
+</div>
+<div class="two-col">
+  <div class="card">
     <h2>📝 Lesson Notes</h2>
     <p style="color:var(--muted);margin-bottom:18px;font-size:13px;">Add notes and assignments after each lesson. Parents can view these in their portal.</p>
     <a href="/admin/lesson-notes" class="btn">📝 Manage Notes</a>
   </div>
-</div>
-<div class="two-col">
   <div class="card">
     <h2>🚫 Cancellation Requests</h2>
     <p style="color:var(--muted);margin-bottom:18px;font-size:13px;">Review and respond to date-blocking requests submitted by parents.</p>
     <a href="/admin/blocked-dates" class="btn btn-warning">🚫 View Requests</a>
   </div>
-  <div class="card">
-    <h2>👨‍👩‍👧 Parent Accounts</h2>
-    <p style="color:var(--muted);margin-bottom:18px;font-size:13px;">Parents can register and manage their child's lessons at the parent portal.</p>
-    <a href="/parent/login" class="btn btn-outline" target="_blank">👁️ View Parent Portal</a>
-  </div>
+</div>
+<div class="card" style="max-width:480px;">
+  <h2>👨‍👩‍👧 Parent Accounts</h2>
+  <p style="color:var(--muted);margin-bottom:18px;font-size:13px;">Parents can register and manage their child's lessons at the parent portal.</p>
+  <a href="/parent/login" class="btn btn-outline" target="_blank">👁️ View Parent Portal</a>
 </div>"""
     return HTMLResponse(page("Admin", content, "admin"))
+
+
+@app.get("/admin/users", response_class=HTMLResponse)
+def admin_users_page(request: Request, msg: str = ""):
+    users = get_all_users()
+    msg_html = f'<div class="alert alert-success">{msg}</div>' if msg else ''
+
+    rows = ""
+    for u in sorted(users, key=lambda x: x.get('created_at', ''), reverse=True):
+        uid     = u.get('id', '')
+        is_admin = u.get('is_admin') == 'true'
+        is_beta  = u.get('is_beta_tester') == 'true'
+        role_badge = ('<span class="badge badge-info">Admin</span>' if is_admin
+                      else '<span class="badge badge-warning">Beta Tester</span>')
+        promote_btn = "" if is_admin else (
+            f'<form action="/admin/users/{uid}/promote" method="post" style="display:inline;">'
+            f'<button type="submit" class="btn btn-sm" onclick="return confirm(\'Promote {u.get("name","")} to admin?\')">⬆️ Promote</button>'
+            f'</form>'
+        )
+        delete_btn = "" if uid == "1" else (  # protect seed admin (id=1)
+            f'<form action="/admin/users/{uid}/delete" method="post" style="display:inline;">'
+            f'<button type="submit" class="btn btn-danger btn-sm" onclick="return confirm(\'Delete {u.get("name","")}?\')">🗑️</button>'
+            f'</form>'
+        )
+        rows += f"""<tr>
+  <td><strong>{u.get('name','')}</strong></td>
+  <td style="font-size:12px;">{u.get('email','')}</td>
+  <td>{role_badge}</td>
+  <td style="font-size:12px;color:var(--muted);">{u.get('created_at','')}</td>
+  <td style="display:flex;gap:4px;flex-wrap:wrap;">{promote_btn}{delete_btn}</td>
+</tr>"""
+
+    if not rows:
+        rows = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px;">No users yet.</td></tr>'
+
+    beta_count  = sum(1 for u in users if u.get('is_beta_tester') == 'true')
+    admin_count = sum(1 for u in users if u.get('is_admin') == 'true')
+
+    content = f"""{msg_html}
+<div class="stats-row">
+  <div class="stat-card"><div class="stat-icon" style="background:#e0e7ff;">👥</div>
+    <div class="stat-val">{len(users)}</div><div class="stat-lbl">Total Users</div></div>
+  <div class="stat-card"><div class="stat-icon" style="background:#fef3c7;">🧪</div>
+    <div class="stat-val">{beta_count}</div><div class="stat-lbl">Beta Testers</div></div>
+  <div class="stat-card"><div class="stat-icon" style="background:#d1fae5;">🔐</div>
+    <div class="stat-val">{admin_count}</div><div class="stat-lbl">Admins</div></div>
+</div>
+<div class="card">
+  <div class="card-header">
+    <h2 style="margin:0;">👤 All Users</h2>
+    <a href="/signup" class="btn btn-outline btn-sm" target="_blank">🔗 Share Signup</a>
+  </div>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Joined</th><th>Actions</th></tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+  </div>
+</div>"""
+    return HTMLResponse(page("User Management", content, "users"))
+
+
+@app.post("/admin/users/{user_id}/promote")
+def admin_promote_user(user_id: str):
+    users = get_all_users()
+    for u in users:
+        if u.get('id') == user_id:
+            u['is_admin']       = 'true'
+            u['is_beta_tester'] = 'false'
+            break
+    save_all_users(users)
+    return RedirectResponse(url="/admin/users?msg=User+promoted+to+admin", status_code=303)
+
+
+@app.post("/admin/users/{user_id}/delete")
+def admin_delete_user(user_id: str):
+    if user_id == "1":  # never delete the seed admin
+        return RedirectResponse(url="/admin/users?msg=Cannot+delete+the+primary+admin+account", status_code=303)
+    users = [u for u in get_all_users() if u.get('id') != user_id]
+    save_all_users(users)
+    return RedirectResponse(url="/admin/users?msg=User+deleted", status_code=303)
 
 
 @app.get("/edit-student/{student_name}")
