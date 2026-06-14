@@ -121,6 +121,8 @@ with open("static/style.css", "w") as f:
 LEDGER_FILE = "/data/studio_ledger.csv"
 PROFILES_FILE = "/data/student_profiles.csv"
 PRICING_FILE = "/data/pricing_tiers.csv"
+INVOICES_FILE = "/data/invoices.csv"
+INVOICE_HEADERS = ["ID", "Student", "Month", "Year", "LessonsCount", "TotalAmount", "PaymentsApplied", "BalanceDue", "Status", "CreatedDate", "PaidDate"]
 SETTINGS_FILE = "/data/calendar_settings.json"
 DEFAULT_RATE = 50.00
 
@@ -140,6 +142,7 @@ def page(title: str, content: str, active: str = "dashboard", extra_head: str = 
         ("students",  "/students",  "👥", "Students"),
         ("rates",     "/rates",     "💰", "Rates"),
         ("payments",  "/payments",  "💳", "Payments"),
+        ("invoices",  "/invoices",  "🧾", "Invoices"),
         ("schedule",  "/schedule",  "📅", "Schedule"),
         ("revenue",   "/revenue",   "📊", "Revenue"),
         ("analytics", "/analytics", "📈", "Analytics"),
@@ -268,6 +271,83 @@ def load_calendar_settings():
 def save_calendar_settings(settings):
     with open(SETTINGS_FILE, 'w') as f:
         json.dump(settings, f, indent=2)
+
+
+def get_all_invoices():
+    invoices = []
+    if os.path.exists(INVOICES_FILE):
+        with open(INVOICES_FILE, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                invoices.append(dict(row))
+    return invoices
+
+
+def save_all_invoices(invoices):
+    with open(INVOICES_FILE, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=INVOICE_HEADERS)
+        writer.writeheader()
+        for inv in invoices:
+            writer.writerow({k: inv.get(k, '') for k in INVOICE_HEADERS})
+
+
+def generate_invoices_for_month(year: int, month: int) -> int:
+    profiles = get_all_profiles()
+    invoices = get_all_invoices()
+    existing_keys = {(inv['Student'], inv['Year'], inv['Month']) for inv in invoices}
+
+    ledger_by_student = {}
+    if os.path.exists(LEDGER_FILE):
+        with open(LEDGER_FILE, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    date = datetime.strptime(row.get('Date', ''), '%Y-%m-%d')
+                except ValueError:
+                    continue
+                if date.year != year or date.month != month:
+                    continue
+                student = row.get('Student', '').strip()
+                status = row.get('Status', '')
+                amount = float(row.get('AmountCharged', 0) or 0)
+                if student not in ledger_by_student:
+                    ledger_by_student[student] = {'lessons': 0, 'amount_charged': 0.0}
+                if status in ('Confirmed', 'Attended'):
+                    ledger_by_student[student]['lessons'] += 1
+                    ledger_by_student[student]['amount_charged'] += amount
+
+    next_id = max((int(inv.get('ID', 0)) for inv in invoices), default=0) + 1
+    new_invoices = []
+    month_str = str(month)
+    year_str = str(year)
+
+    for student, data in ledger_by_student.items():
+        if data['lessons'] == 0:
+            continue
+        if (student, year_str, month_str) in existing_keys:
+            continue
+        rate = profiles.get(student, {}).get('rate', DEFAULT_RATE)
+        total_amount = round(data['lessons'] * rate, 2)
+        payments_applied = round(data['amount_charged'], 2)
+        balance_due = round(max(total_amount - payments_applied, 0), 2)
+        new_invoices.append({
+            'ID': str(next_id),
+            'Student': student,
+            'Month': month_str,
+            'Year': year_str,
+            'LessonsCount': str(data['lessons']),
+            'TotalAmount': f"{total_amount:.2f}",
+            'PaymentsApplied': f"{payments_applied:.2f}",
+            'BalanceDue': f"{balance_due:.2f}",
+            'Status': 'Paid' if balance_due <= 0 else 'Unpaid',
+            'CreatedDate': datetime.now().strftime('%Y-%m-%d'),
+            'PaidDate': '',
+        })
+        next_id += 1
+
+    invoices.extend(new_invoices)
+    save_all_invoices(invoices)
+    return len(new_invoices)
 
 
 def format_standard_time(time_str):
@@ -1633,6 +1713,220 @@ def quick_create_student(student_name: str = Form(...), duration_minutes: int = 
     save_all_profiles(profiles)
 
     return RedirectResponse(url="/dashboard", status_code=303)
+
+
+MONTH_NAMES = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+               'July', 'August', 'September', 'October', 'November', 'December']
+MONTH_SHORT  = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+
+@app.get("/invoices", response_class=HTMLResponse)
+def invoices_page():
+    invoices = get_all_invoices()
+    invoices_sorted = sorted(
+        invoices,
+        key=lambda x: (x.get('Year', ''), x.get('Month', '').zfill(2), x.get('Student', '')),
+        reverse=True,
+    )
+
+    unpaid = [i for i in invoices if i.get('Status') == 'Unpaid']
+    paid   = [i for i in invoices if i.get('Status') == 'Paid']
+    total_outstanding = sum(float(i.get('BalanceDue', 0)) for i in unpaid)
+
+    rows = ""
+    for inv in invoices_sorted:
+        m = int(inv.get('Month', 1))
+        month_label = f"{MONTH_SHORT[m]} {inv.get('Year', '')}"
+        status  = inv.get('Status', 'Unpaid')
+        badge   = 'badge-success' if status == 'Paid' else 'badge-warning'
+        balance = float(inv.get('BalanceDue', 0))
+        bal_color = 'color:var(--success);' if balance <= 0 else 'color:var(--danger);'
+        inv_id  = inv.get('ID', '')
+        rows += f"""<tr>
+  <td><a href="/invoices/{inv_id}" style="color:var(--primary);font-weight:600;">#INV-{inv_id.zfill(4)}</a></td>
+  <td><strong>{inv.get('Student', '')}</strong></td>
+  <td>{month_label}</td>
+  <td>{inv.get('LessonsCount', 0)}</td>
+  <td>${float(inv.get('TotalAmount', 0)):.2f}</td>
+  <td>${float(inv.get('PaymentsApplied', 0)):.2f}</td>
+  <td style="font-weight:700;{bal_color}">${balance:.2f}</td>
+  <td><span class="badge {badge}">{status}</span></td>
+  <td><a href="/invoices/{inv_id}" class="btn btn-outline btn-sm">View</a></td>
+</tr>"""
+
+    if not rows:
+        rows = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--muted);">No invoices yet — use the form below to generate.</td></tr>'
+
+    now = datetime.now()
+    prev_month = now.month - 1 if now.month > 1 else 12
+    prev_year  = now.year if now.month > 1 else now.year - 1
+    month_options = "".join(
+        f'<option value="{i}"{" selected" if i == prev_month else ""}>{MONTH_NAMES[i]}</option>'
+        for i in range(1, 13)
+    )
+
+    content = f"""
+<div class="stats-row">
+  <div class="stat-card"><div class="stat-icon" style="background:#e0e7ff;">🧾</div>
+    <div class="stat-val">{len(invoices)}</div><div class="stat-lbl">Total Invoices</div></div>
+  <div class="stat-card"><div class="stat-icon" style="background:#fee2e2;">⏳</div>
+    <div class="stat-val">{len(unpaid)}</div><div class="stat-lbl">Unpaid</div></div>
+  <div class="stat-card"><div class="stat-icon" style="background:#d1fae5;">✅</div>
+    <div class="stat-val">{len(paid)}</div><div class="stat-lbl">Paid</div></div>
+  <div class="stat-card"><div class="stat-icon" style="background:#fef3c7;">💰</div>
+    <div class="stat-val">${total_outstanding:.2f}</div><div class="stat-lbl">Outstanding</div></div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h2 style="margin:0;">🧾 Invoices</h2>
+    <a href="/invoices" class="btn btn-outline btn-sm">🔄 Refresh</a>
+  </div>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Invoice</th><th>Student</th><th>Period</th><th>Lessons</th><th>Total</th><th>Applied</th><th>Balance Due</th><th>Status</th><th></th></tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card" style="max-width:480px;">
+  <h2>⚡ Generate Invoices</h2>
+  <p style="color:var(--muted);font-size:13px;margin-bottom:16px;">Creates one invoice per student for all confirmed lessons in the selected month. Skips months already invoiced.</p>
+  <form action="/generate-invoices" method="post">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div class="form-group" style="margin:0;">
+        <label class="form-label">Month</label>
+        <select name="month">{month_options}</select>
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label class="form-label">Year</label>
+        <input type="number" name="year" value="{prev_year}" min="2020" max="2035" required>
+      </div>
+    </div>
+    <button type="submit" class="btn" style="margin-top:14px;">⚡ Generate Invoices</button>
+  </form>
+</div>"""
+    return HTMLResponse(page("Invoices", content, "invoices"))
+
+
+@app.post("/generate-invoices")
+def generate_invoices_post(month: int = Form(...), year: int = Form(...)):
+    count = generate_invoices_for_month(year, month)
+    period = f"{MONTH_NAMES[month]} {year}"
+    if count > 0:
+        msg = f"Generated {count} invoice(s) for {period}."
+        icon = "✅"
+        heading = "Invoices Generated"
+    else:
+        msg = f"No new invoices for {period}. Either no confirmed lessons exist or invoices were already generated."
+        icon = "ℹ️"
+        heading = "Nothing to Generate"
+    content = f"""<div class="card" style="max-width:480px;text-align:center;">
+  <div style="font-size:48px;margin-bottom:12px;">{icon}</div>
+  <h2>{heading}</h2>
+  <p style="color:var(--muted);margin:12px 0;">{msg}</p>
+  <a href="/invoices" class="btn" style="margin-top:8px;">← View All Invoices</a>
+</div>"""
+    return HTMLResponse(page("Generate Invoices", content, "invoices"))
+
+
+@app.get("/invoices/{invoice_id}", response_class=HTMLResponse)
+def invoice_detail(invoice_id: str):
+    invoices = get_all_invoices()
+    inv = next((i for i in invoices if i.get('ID') == invoice_id), None)
+    if not inv:
+        return RedirectResponse(url="/invoices", status_code=303)
+
+    m           = int(inv.get('Month', 1))
+    month_label = f"{MONTH_NAMES[m]} {inv.get('Year', '')}"
+    student     = inv.get('Student', '')
+    lessons     = int(inv.get('LessonsCount', 0))
+    total       = float(inv.get('TotalAmount', 0))
+    applied     = float(inv.get('PaymentsApplied', 0))
+    balance     = float(inv.get('BalanceDue', 0))
+    status      = inv.get('Status', 'Unpaid')
+    rate        = total / lessons if lessons > 0 else 0
+
+    status_badge = (
+        '<span class="badge badge-success" style="font-size:14px;padding:5px 14px;">✅ Paid</span>'
+        if status == 'Paid' else
+        '<span class="badge badge-warning" style="font-size:14px;padding:5px 14px;">⏳ Unpaid</span>'
+    )
+    paid_row = (
+        f'<tr><td style="color:var(--muted);padding:6px 12px;">Paid On</td>'
+        f'<td style="padding:6px 12px;"><strong>{inv.get("PaidDate","")}</strong></td></tr>'
+        if status == 'Paid' and inv.get('PaidDate') else ''
+    )
+    mark_paid_btn = (
+        '' if status == 'Paid' else
+        f'<form action="/mark-invoice-paid/{invoice_id}" method="post" style="display:inline;">'
+        f'<button type="submit" class="btn btn-success">✅ Mark as Paid</button></form>'
+    )
+    bal_color = 'color:var(--success);' if balance <= 0 else 'color:var(--danger);'
+
+    content = f"""
+<div class="card" style="max-width:600px;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px;">
+    <div>
+      <h2 style="margin:0;">Invoice #INV-{invoice_id.zfill(4)}</h2>
+      <div style="color:var(--muted);font-size:13px;margin-top:4px;">Created {inv.get('CreatedDate','')}</div>
+    </div>
+    {status_badge}
+  </div>
+
+  <div style="background:var(--bg);border-radius:10px;padding:16px;margin-bottom:20px;">
+    <table style="border:none;">
+      <tbody>
+        <tr><td style="color:var(--muted);width:130px;padding:5px 12px;border:none;">Student</td>
+            <td style="padding:5px 12px;border:none;"><strong>{student}</strong></td></tr>
+        <tr><td style="color:var(--muted);padding:5px 12px;border:none;">Period</td>
+            <td style="padding:5px 12px;border:none;"><strong>{month_label}</strong></td></tr>
+        {paid_row}
+      </tbody>
+    </table>
+  </div>
+
+  <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:20px;">
+    <table>
+      <thead><tr><th>Description</th><th style="text-align:right;">Amount</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>{lessons} lesson{"s" if lessons != 1 else ""} × ${rate:.2f}/lesson</td>
+          <td style="text-align:right;font-weight:600;">${total:.2f}</td>
+        </tr>
+        <tr>
+          <td style="color:var(--success);">Payments Applied</td>
+          <td style="text-align:right;color:var(--success);font-weight:600;">−${applied:.2f}</td>
+        </tr>
+        <tr style="border-top:2px solid var(--border);">
+          <td style="font-weight:700;font-size:15px;padding:12px 13px;">Balance Due</td>
+          <td style="text-align:right;font-weight:800;font-size:18px;padding:12px 13px;{bal_color}">${balance:.2f}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    {mark_paid_btn}
+    <a href="/invoices" class="btn btn-outline">← All Invoices</a>
+  </div>
+</div>"""
+    return HTMLResponse(page(f"Invoice #INV-{invoice_id.zfill(4)}", content, "invoices"))
+
+
+@app.post("/mark-invoice-paid/{invoice_id}")
+def mark_invoice_paid(invoice_id: str):
+    invoices = get_all_invoices()
+    for inv in invoices:
+        if inv.get('ID') == invoice_id:
+            inv['Status']   = 'Paid'
+            inv['PaidDate'] = datetime.now().strftime('%Y-%m-%d')
+            inv['BalanceDue'] = '0.00'
+            break
+    save_all_invoices(invoices)
+    return RedirectResponse(url=f"/invoices/{invoice_id}", status_code=303)
 
 
 @app.get("/static/style.css")
