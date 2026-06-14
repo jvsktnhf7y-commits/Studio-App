@@ -128,6 +128,12 @@ LEDGER_FIELDS = ['Date', 'Student', 'Status', 'AmountCharged', 'Notes']
 SETTINGS_FILE = "/data/calendar_settings.json"
 DEFAULT_RATE = 50.00
 
+# Status bucket constants — used everywhere status is evaluated
+ATTENDED_STATUSES    = frozenset(['Confirmed', 'Attended', 'Completed', 'Completed (Half Rate)'])
+MISSED_STATUSES      = frozenset(['Missed', 'No-Show', 'No Show'])
+ZERO_CHARGE_STATUSES = frozenset(['Cancelled', 'Rescheduled', 'Completed (Make-up)'])
+HALF_CHARGE_STATUSES = frozenset(['Completed (Half Rate)'])
+
 # Rate limiter dictionary to prevent rapid repeated clicks
 rate_limit = {}
 
@@ -398,7 +404,7 @@ def generate_invoices_for_month(year: int, month: int) -> int:
                 amount = float(row.get('AmountCharged', 0) or 0)
                 if student not in ledger_by_student:
                     ledger_by_student[student] = {'lessons': 0, 'amount_charged': 0.0}
-                if status in ('Confirmed', 'Attended'):
+                if status in ATTENDED_STATUSES:
                     ledger_by_student[student]['lessons'] += 1
                     ledger_by_student[student]['amount_charged'] += amount
 
@@ -542,6 +548,7 @@ def dashboard(request: Request):
     existing_students = get_all_profiles()
     settings = load_calendar_settings()
     show_all = True
+    mode = request.cookies.get("dashboard_mode", "simple")
 
     # Fetch calendar events — build event items HTML
     today_events_html = ""
@@ -589,7 +596,28 @@ def dashboard(request: Request):
 
                 if matched_student:
                     today_lesson_count += 1
-                    today_events_html += f"""<div class="event-item">
+                    if mode == "detailed":
+                        today_events_html += f"""<div class="event-item">
+  <div class="event-name">🎵 {matched_student}</div>
+  <div class="event-meta">{display_time} &middot; {duration_minutes} min</div>
+  <form action="/log-attendance" method="post" style="margin-top:10px;">
+    <input type="hidden" name="student_name" value="{matched_student}">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+      <select name="status" style="flex:2;min-width:210px;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;color:var(--dark);background:#fff;outline:none;">
+        <option value="Completed">✅ Completed (Full Rate)</option>
+        <option value="Completed (Half Rate)">⚡ Completed (Half Rate)</option>
+        <option value="Completed (Make-up)">🔄 Make-up (No Charge)</option>
+        <option value="No Show">❌ No Show (Full Charge)</option>
+        <option value="Cancelled">🚫 Cancelled (No Charge)</option>
+        <option value="Rescheduled">📅 Rescheduled (No Charge)</option>
+      </select>
+      <input type="text" name="notes" placeholder="Add a note…" style="flex:1;min-width:130px;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;color:var(--dark);background:#fff;outline:none;font-family:inherit;">
+      <button type="submit" class="btn btn-sm" style="flex-shrink:0;">Log</button>
+    </div>
+  </form>
+</div>"""
+                    else:
+                        today_events_html += f"""<div class="event-item">
   <div class="event-name">🎵 {matched_student}</div>
   <div class="event-meta">{display_time} &middot; {duration_minutes} min</div>
   <div class="event-actions">
@@ -649,7 +677,7 @@ def dashboard(request: Request):
                     if row.get('Student', '') != name:
                         continue
                     s = row.get('Status', '')
-                    if s in ('Confirmed', 'Attended'):
+                    if s in ATTENDED_STATUSES:
                         attended += 1
                         try:
                             d = datetime.strptime(row.get('Date', ''), '%Y-%m-%d')
@@ -657,9 +685,9 @@ def dashboard(request: Request):
                                 lessons_this_month += 1
                         except ValueError:
                             pass
-                    elif s in ('Missed', 'No-Show'):
+                    elif s in MISSED_STATUSES:
                         missed += 1
-                    elif s == 'Cancelled':
+                    elif s in ZERO_CHARGE_STATUSES:
                         cancelled += 1
         lessons_remaining = int(prepaid / rate) if rate > 0 else 0
         initials = ''.join(p[0].upper() for p in name.split()[:2])
@@ -683,6 +711,10 @@ def dashboard(request: Request):
 
     if not student_rows_html:
         student_rows_html = '<p style="color:var(--muted);font-size:13px;">No students yet. <a href="/students" style="color:var(--primary);">Add your first student →</a></p>'
+
+    mode_label   = "⚙️ Simple" if mode == "detailed" else "⚙️ Detailed"
+    mode_tip     = "Switch to Simple Mode" if mode == "detailed" else "Switch to Detailed Mode"
+    mode_badge   = f'<span style="font-size:10px;padding:2px 7px;border-radius:10px;background:{"#e0e7ff" if mode=="detailed" else "#f1f5f9"};color:{"#3730a3" if mode=="detailed" else "var(--muted)"};">{"DETAILED" if mode=="detailed" else "SIMPLE"}</span>'
 
     content = f"""
 <div class="stats-row">
@@ -711,8 +743,16 @@ def dashboard(request: Request):
 <div class="two-col">
   <div class="card">
     <div class="card-header">
-      <h3 class="card-title">📅 Today's Lessons</h3>
-      <a href="/schedule" class="btn btn-outline btn-sm">+ Schedule</a>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <h3 class="card-title">📅 Today's Lessons</h3>
+        {mode_badge}
+      </div>
+      <div style="display:flex;gap:6px;">
+        <form action="/toggle-dashboard-mode" method="post" style="display:inline;">
+          <button type="submit" class="btn btn-ghost btn-sm" title="{mode_tip}">{mode_label}</button>
+        </form>
+        <a href="/schedule" class="btn btn-outline btn-sm">+ Schedule</a>
+      </div>
     </div>
     {today_events_html}
   </div>
@@ -726,6 +766,15 @@ def dashboard(request: Request):
 </div>
 """
     return HTMLResponse(page("Dashboard", content, "dashboard"))
+
+
+@app.post("/toggle-dashboard-mode")
+def toggle_dashboard_mode(request: Request):
+    current  = request.cookies.get("dashboard_mode", "simple")
+    new_mode = "detailed" if current == "simple" else "simple"
+    response = RedirectResponse(url="/dashboard", status_code=303)
+    response.set_cookie(key="dashboard_mode", value=new_mode, httponly=True, max_age=86400 * 90)
+    return response
 
 # Login
 @app.get("/login", response_class=HTMLResponse)
@@ -1066,12 +1115,12 @@ def record_payment(student_name: str = Form(...), amount: float = Form(...), pay
     return RedirectResponse(url="/payments", status_code=303)
 
 @app.post("/log-attendance")
-def log_attendance(request: Request, student_name: str = Form(...), status: str = Form(...)):
+def log_attendance(request: Request, student_name: str = Form(...), status: str = Form(...), notes: str = Form("")):
     """Log attendance and deduct lesson fee from prepaid balance."""
     today = datetime.now().strftime("%Y-%m-%d")
     profiles = get_all_profiles()
     student = profiles.get(student_name, {})
-    rate = student.get('rate', DEFAULT_RATE)
+    rate    = student.get('rate', DEFAULT_RATE)
     prepaid = float(student.get('prepaid', 0.0))
 
     # Rate limiting
@@ -1094,8 +1143,7 @@ def log_attendance(request: Request, student_name: str = Form(...), status: str 
     existing_status = None
     if os.path.exists(LEDGER_FILE):
         with open(LEDGER_FILE, 'r', newline='') as f:
-            reader = _ledger_reader(f)
-            for row in reader:
+            for row in _ledger_reader(f):
                 if row.get('Date') == today and row.get('Student') == student_name:
                     already_logged = True
                     existing_status = row.get('Status', '')
@@ -1113,51 +1161,55 @@ def log_attendance(request: Request, student_name: str = Form(...), status: str 
                 <a href="/dashboard" class="btn">Back to Dashboard</a>
             </div></div></body></html>""")
 
-    # Determine charge and new balance
-    if status == 'Cancelled':
-        amount_charged = 0.00
-        new_prepaid = prepaid
-        ledger_status = 'Cancelled'
-        ledger_note = 'Cancelled — no charge'
-        insufficient = False
+    # Determine charge multiplier by status
+    if status in ZERO_CHARGE_STATUSES:
+        charge_mult = 0.0
+    elif status in HALF_CHARGE_STATUSES:
+        charge_mult = 0.5
     else:
-        # Confirmed and Missed both charge the full lesson rate
-        if prepaid >= rate:
-            amount_charged = rate
-            new_prepaid = prepaid - rate
-            ledger_status = status
-            ledger_note = f"Deducted from prepaid: ${prepaid:.2f} → ${new_prepaid:.2f}"
-            insufficient = False
+        charge_mult = 1.0  # full rate for attended and missed/no-show
+
+    target_charge = round(rate * charge_mult, 2)
+
+    if charge_mult == 0.0:
+        # No charge — no balance check needed
+        amount_charged = 0.00
+        new_prepaid    = prepaid
+        ledger_note    = notes or f"{status} — no charge"
+        insufficient   = False
+    else:
+        if prepaid >= target_charge:
+            amount_charged = target_charge
+            new_prepaid    = round(prepaid - target_charge, 2)
+            ledger_note    = notes or f"Deducted from prepaid: ${prepaid:.2f} → ${new_prepaid:.2f}"
+            insufficient   = False
         else:
             amount_charged = 0.00
-            new_prepaid = prepaid
-            ledger_status = status          # always record real status (Confirmed/Missed)
-            ledger_note = f"Balance insufficient (${prepaid:.2f}) — payment required"
-            insufficient = True
+            new_prepaid    = prepaid
+            ledger_note    = notes or f"Balance insufficient (${prepaid:.2f}) — payment required"
+            insufficient   = True
 
     # Write ledger entry
     with open(LEDGER_FILE, 'a', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow([today, student_name, ledger_status, f"{amount_charged:.2f}", ledger_note])
+        csv.writer(f).writerow([today, student_name, status, f"{amount_charged:.2f}", ledger_note])
 
-    # Update prepaid balance in profiles
+    # Update prepaid balance
     if student_name in profiles:
-        profiles[student_name]['prepaid'] = round(new_prepaid, 2)
+        profiles[student_name]['prepaid'] = new_prepaid
         save_all_profiles(profiles)
 
-    # Insufficient balance warning page
+    # Insufficient balance warning
     if insufficient:
         return HTMLResponse(f"""<!DOCTYPE html>
         <html><head><title>Insufficient Balance</title><link rel="stylesheet" href="/static/style.css"></head>
         <body><div class="container" style="max-width:520px;margin-top:40px;">
             <div class="card" style="text-align:center;">
                 <h1>⚠️ Insufficient Balance</h1>
-                <p><strong>{student_name}</strong> has been marked as
-                   <strong>{status}</strong> in the ledger.</p>
+                <p><strong>{student_name}</strong> has been marked as <strong>{status}</strong> in the ledger.</p>
                 <div style="background:#fef3c7;border:2px solid #f59e0b;border-radius:16px;padding:20px;margin:20px 0;">
                     <p style="margin:0;font-size:16px;color:#92400e;">
                         <strong>Current prepaid balance: ${prepaid:.2f}</strong><br>
-                        Lesson rate: ${rate:.2f}<br><br>
+                        Charge required: ${target_charge:.2f}<br><br>
                         Insufficient prepaid balance.<br>Please collect payment first.
                     </p>
                 </div>
@@ -1166,12 +1218,17 @@ def log_attendance(request: Request, student_name: str = Form(...), status: str 
                 <a href="/payments" class="btn" style="background:#22c55e;">Record Payment</a>
             </div></div></body></html>""")
 
-    # Cancelled — silent redirect
-    if status == 'Cancelled':
+    # Zero-charge statuses — silent redirect
+    if charge_mult == 0.0:
         return RedirectResponse(url="/dashboard", status_code=303)
 
-    # Success confirmation with auto-redirect
-    emoji = "✅" if status == "Confirmed" else "❌"
+    # Success page
+    STATUS_EMOJI = {
+        'Confirmed': '✅', 'Completed': '✅', 'Completed (Half Rate)': '⚡',
+        'Missed': '❌', 'No Show': '❌', 'No-Show': '❌',
+    }
+    emoji = STATUS_EMOJI.get(status, '📋')
+    half_note = ' <span style="font-size:13px;opacity:.8;">(half rate)</span>' if status in HALF_CHARGE_STATUSES else ''
     return HTMLResponse(f"""<!DOCTYPE html>
     <html><head><title>Lesson Logged</title><link rel="stylesheet" href="/static/style.css">
     <meta http-equiv="refresh" content="3;url=/dashboard"></head>
@@ -1181,10 +1238,11 @@ def log_attendance(request: Request, student_name: str = Form(...), status: str 
             <p><strong>{student_name}</strong> marked as <strong>{status}</strong>.</p>
             <div style="background:#d1fae5;border:2px solid #22c55e;border-radius:16px;padding:20px;margin:20px 0;">
                 <p style="margin:0;font-size:16px;color:#065f46;">
-                    <strong>💰 ${amount_charged:.2f} deducted from prepaid</strong><br>
+                    <strong>💰 ${amount_charged:.2f} deducted{half_note}</strong><br>
                     New balance: <strong>${new_prepaid:.2f}</strong>
                 </p>
             </div>
+            {f'<p style="color:var(--muted);font-size:12px;margin-bottom:12px;">Note: {ledger_note}</p>' if notes else ''}
             <p style="color:#888;font-size:14px;">Redirecting in 3 seconds…</p>
             <a href="/dashboard" class="btn">Back to Dashboard</a>
         </div></div></body></html>""")
@@ -1281,11 +1339,11 @@ def compute_analytics():
     att = defaultdict(int)
     for row in ledger_rows:
         s = row.get('Status', '')
-        if s in ('Confirmed', 'Attended'):
+        if s in ATTENDED_STATUSES:
             att['confirmed'] += 1
-        elif s in ('Missed', 'No-Show'):
+        elif s in MISSED_STATUSES:
             att['missed'] += 1
-        elif s == 'Cancelled':
+        elif s in ZERO_CHARGE_STATUSES:
             att['cancelled'] += 1
     att_total = sum(att.values()) or 1
     confirmed_pct = round(att['confirmed'] / att_total * 100, 1)
@@ -1298,11 +1356,11 @@ def compute_analytics():
         if row['_date']:
             key = (row['_date'].year, row['_date'].month)
             s = row.get('Status', '')
-            if s in ('Confirmed', 'Attended'):
+            if s in ATTENDED_STATUSES:
                 mthly_att[key]['confirmed'] += 1
-            elif s in ('Missed', 'No-Show'):
+            elif s in MISSED_STATUSES:
                 mthly_att[key]['missed'] += 1
-            elif s == 'Cancelled':
+            elif s in ZERO_CHARGE_STATUSES:
                 mthly_att[key]['cancelled'] += 1
 
     monthly_att = [
@@ -1318,11 +1376,11 @@ def compute_analytics():
     for row in ledger_rows:
         stu = row.get('Student', '')
         s = row.get('Status', '')
-        if s in ('Confirmed', 'Attended'):
+        if s in ATTENDED_STATUSES:
             stu_att[stu]['c'] += 1
-        elif s in ('Missed', 'No-Show'):
+        elif s in MISSED_STATUSES:
             stu_att[stu]['m'] += 1
-        elif s == 'Cancelled':
+        elif s in ZERO_CHARGE_STATUSES:
             stu_att[stu]['x'] += 1
 
     reliability = []
@@ -1339,7 +1397,7 @@ def compute_analytics():
     day_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
     dow = defaultdict(int)
     for row in ledger_rows:
-        if row['_date'] and row.get('Status', '') in ('Confirmed', 'Attended'):
+        if row['_date'] and row.get('Status', '') in ATTENDED_STATUSES:
             dow[row['_date'].weekday()] += 1
     dow_data = [{'day': day_names[i], 'count': dow[i]} for i in range(7)]
 
@@ -2175,14 +2233,14 @@ def student_dashboard(request: Request):
                     all_lessons.append(row)
     all_lessons.sort(key=lambda x: x.get("Date", ""), reverse=True)
 
-    confirmed_total = sum(1 for l in all_lessons if l.get("Status") in ("Confirmed", "Attended"))
-    missed_total    = sum(1 for l in all_lessons if l.get("Status") in ("Missed", "No-Show"))
+    confirmed_total = sum(1 for l in all_lessons if l.get("Status") in ATTENDED_STATUSES)
+    missed_total    = sum(1 for l in all_lessons if l.get("Status") in MISSED_STATUSES)
 
     # This-month count
     now = datetime.now()
     this_month = sum(
         1 for l in all_lessons
-        if l.get("Status") in ("Confirmed", "Attended")
+        if l.get("Status") in ATTENDED_STATUSES
         and l.get("Date", "")[:7] == now.strftime("%Y-%m")
     )
 
@@ -2239,7 +2297,7 @@ def student_dashboard(request: Request):
     history_rows = ""
     for l in all_lessons[:6]:
         s = l.get("Status", "")
-        badge = "badge-success" if s in ("Confirmed", "Attended") else ("badge-danger" if s in ("Missed", "No-Show") else "badge-muted")
+        badge = "badge-success" if s in ATTENDED_STATUSES else ("badge-danger" if s in MISSED_STATUSES else "badge-muted")
         history_rows += (
             f'<tr><td>{l.get("Date","")}</td>'
             f'<td><span class="badge {badge}">{s}</span></td>'
@@ -2361,11 +2419,11 @@ def student_lessons(request: Request):
     history_rows = ""
     for l in all_lessons:
         s = l.get("Status", "")
-        if s in ("Confirmed", "Attended"):
+        if s in ATTENDED_STATUSES:
             badge, emoji = "badge-success", "✅"
-        elif s in ("Missed", "No-Show"):
+        elif s in MISSED_STATUSES:
             badge, emoji = "badge-danger", "❌"
-        elif s == "Cancelled":
+        elif s in ZERO_CHARGE_STATUSES:
             badge, emoji = "badge-muted", "🔄"
         else:
             badge, emoji = "badge-warning", "⚠️"
