@@ -123,6 +123,7 @@ PROFILES_FILE = "/data/student_profiles.csv"
 PRICING_FILE = "/data/pricing_tiers.csv"
 INVOICES_FILE = "/data/invoices.csv"
 INVOICE_HEADERS = ["ID", "Student", "Month", "Year", "LessonsCount", "TotalAmount", "PaymentsApplied", "BalanceDue", "Status", "CreatedDate", "PaidDate"]
+LEDGER_FIELDS = ['Date', 'Student', 'Status', 'AmountCharged', 'Notes']
 SETTINGS_FILE = "/data/calendar_settings.json"
 DEFAULT_RATE = 50.00
 
@@ -135,6 +136,26 @@ if not os.path.exists(PASSWORD_FILE):
     default_hash = hashlib.sha256("studio2025".encode()).hexdigest()
     with open(PASSWORD_FILE, 'w') as f:
         json.dump({"password_hash": default_hash}, f)
+
+if not os.path.exists(LEDGER_FILE):
+    with open(LEDGER_FILE, 'w', newline='') as f:
+        csv.writer(f).writerow(LEDGER_FIELDS)
+
+
+def _ledger_reader(f):
+    """Return a DictReader for the ledger that works whether or not the file has a header row."""
+    first = f.readline()
+    f.seek(0)
+    if first.strip() == ','.join(LEDGER_FIELDS):
+        return csv.DictReader(f)          # file has headers — normal read
+    return csv.DictReader(f, fieldnames=LEDGER_FIELDS)   # legacy no-header file
+
+
+def _safe_float(value):
+    try:
+        return float(value or 0)
+    except (ValueError, TypeError):
+        return 0.0
 
 def page(title: str, content: str, active: str = "dashboard", extra_head: str = "") -> str:
     links = [
@@ -299,7 +320,7 @@ def generate_invoices_for_month(year: int, month: int) -> int:
     ledger_by_student = {}
     if os.path.exists(LEDGER_FILE):
         with open(LEDGER_FILE, 'r') as f:
-            reader = csv.DictReader(f)
+            reader = _ledger_reader(f)
             for row in reader:
                 try:
                     date = datetime.strptime(row.get('Date', ''), '%Y-%m-%d')
@@ -550,24 +571,43 @@ def dashboard(request: Request):
     total_prepaid = sum(d.get('prepaid', 0) for d in profiles.values())
     total_revenue = calculate_total_revenue()
 
+    now_month = datetime.now().month
+    now_year  = datetime.now().year
     student_rows_html = ""
     for name, data in profiles.items():
-        prepaid = data.get('prepaid', 0)
-        attended = missed = cancelled = 0
+        prepaid  = data.get('prepaid', 0)
+        rate     = data.get('rate', DEFAULT_RATE) or DEFAULT_RATE
+        attended = missed = cancelled = lessons_this_month = 0
         if os.path.exists(LEDGER_FILE):
             with open(LEDGER_FILE, 'r') as f:
-                for row in csv.DictReader(f):
-                    if row.get('Student', '') == name:
-                        s = row.get('Status', '')
-                        if s in ('Confirmed', 'Attended'): attended += 1
-                        elif s in ('Missed', 'No-Show'):   missed   += 1
-                        elif s == 'Cancelled':              cancelled += 1
+                for row in _ledger_reader(f):
+                    if row.get('Student', '') != name:
+                        continue
+                    s = row.get('Status', '')
+                    if s in ('Confirmed', 'Attended'):
+                        attended += 1
+                        try:
+                            d = datetime.strptime(row.get('Date', ''), '%Y-%m-%d')
+                            if d.year == now_year and d.month == now_month:
+                                lessons_this_month += 1
+                        except ValueError:
+                            pass
+                    elif s in ('Missed', 'No-Show'):
+                        missed += 1
+                    elif s == 'Cancelled':
+                        cancelled += 1
+        lessons_remaining = int(prepaid / rate) if rate > 0 else 0
         initials = ''.join(p[0].upper() for p in name.split()[:2])
         student_rows_html += f"""<div class="student-row">
   <div class="student-avatar">{initials}</div>
   <div class="student-info">
     <div class="student-name">{name}</div>
-    <div class="student-meta">${data.get('rate', 50):.0f}/hr &middot; {data.get('target_minutes', 60)} min &middot; {data.get('description', '') or 'No description'}</div>
+    <div class="student-meta">${rate:.0f}/hr &middot; {data.get('target_minutes', 60)} min &middot; {data.get('description', '') or 'No description'}</div>
+    <div class="student-meta" style="margin-top:3px;">
+      <span style="color:var(--primary);">📚 {lessons_this_month} this month</span>
+      &middot;
+      <span style="color:var(--success);">💳 {lessons_remaining} remaining</span>
+    </div>
   </div>
   <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;">
     <span class="stat-badge badge-success">✅ {attended}</span>
@@ -963,7 +1003,7 @@ def log_attendance(request: Request, student_name: str = Form(...), status: str 
     existing_status = None
     if os.path.exists(LEDGER_FILE):
         with open(LEDGER_FILE, 'r', newline='') as f:
-            reader = csv.DictReader(f)
+            reader = _ledger_reader(f)
             for row in reader:
                 if row.get('Date') == today and row.get('Student') == student_name:
                     already_logged = True
@@ -1000,8 +1040,8 @@ def log_attendance(request: Request, student_name: str = Form(...), status: str 
         else:
             amount_charged = 0.00
             new_prepaid = prepaid
-            ledger_status = 'Payment Due'
-            ledger_note = f"Insufficient prepaid balance (${prepaid:.2f}) — payment required"
+            ledger_status = status          # always record real status (Confirmed/Missed)
+            ledger_note = f"Balance insufficient (${prepaid:.2f}) — payment required"
             insufficient = True
 
     # Write ledger entry
@@ -1030,7 +1070,7 @@ def log_attendance(request: Request, student_name: str = Form(...), status: str 
                         Insufficient prepaid balance.<br>Please collect payment first.
                     </p>
                 </div>
-                <p style="color:#666;font-size:14px;">Lesson logged as <em>Payment Due</em> — no amount deducted.</p>
+                <p style="color:#666;font-size:14px;">Lesson logged as <em>{status}</em> — no amount deducted.</p>
                 <a href="/dashboard" class="btn">Back to Dashboard</a>
                 <a href="/payments" class="btn" style="background:#22c55e;">Record Payment</a>
             </div></div></body></html>""")
@@ -1066,10 +1106,8 @@ def calculate_total_revenue():
     total_revenue = 0
     if os.path.exists(LEDGER_FILE):
         with open(LEDGER_FILE, 'r', newline='') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                amount = float(row.get("AmountCharged", 0) or 0)
-                total_revenue += amount
+            for row in _ledger_reader(f):
+                total_revenue += _safe_float(row.get("AmountCharged", 0))
     return total_revenue
 
 
@@ -1094,8 +1132,7 @@ def compute_analytics():
     ledger_path = LEDGER_FILE if os.path.exists(LEDGER_FILE) else "studio_ledger.csv"
     if os.path.exists(ledger_path):
         with open(ledger_path, 'r', newline='') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
+            for row in _ledger_reader(f):
                 try:
                     row['_date'] = datetime.strptime(row.get('Date', ''), '%Y-%m-%d')
                 except Exception:
@@ -1440,8 +1477,7 @@ def backup_data():
     ledger = []
     if os.path.exists(LEDGER_FILE):
         with open(LEDGER_FILE, 'r') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
+            for row in _ledger_reader(f):
                 ledger.append(row)
 
     tiers = get_pricing_tiers()
