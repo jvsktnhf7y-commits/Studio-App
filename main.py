@@ -170,6 +170,8 @@ def page(title: str, content: str, active: str = "dashboard", extra_head: str = 
         ("analytics", "/analytics", "📈", "Analytics"),
         ("settings",  "/settings",  "⚙️",  "Settings"),
         ("admin",     "/admin",     "🔐", "Admin"),
+        ("notes",     "/admin/lesson-notes", "📝", "Lesson Notes"),
+        ("cancels",   "/admin/blocked-dates", "🚫", "Cancellations"),
     ]
     nav_html = ""
     for k, href, icon, label in links:
@@ -756,8 +758,9 @@ def login_page(error: str = ""):
       </div>
       <button type="submit" class="btn" style="width:100%;justify-content:center;margin-top:4px;">Sign In</button>
     </form>
-    <div style="margin-top:24px;padding-top:18px;border-top:1px solid var(--border);text-align:center;">
-      <a href="/student/login" style="font-size:12px;color:var(--muted);">Student / Parent portal →</a>
+    <div style="margin-top:24px;padding-top:18px;border-top:1px solid var(--border);text-align:center;display:flex;gap:16px;justify-content:center;">
+      <a href="/student/login" style="font-size:12px;color:var(--muted);">Student portal →</a>
+      <a href="/parent/login" style="font-size:12px;color:#7c3aed;">Parent portal →</a>
     </div>
   </div>
 </div>
@@ -802,6 +805,14 @@ async def auth_middleware(request: Request, call_next):
         if request.cookies.get("student_session"):
             return await call_next(request)
         return RedirectResponse(url="/student/login", status_code=303)
+
+    # Parent portal: login/register/logout always public; other /parent/* need parent cookie
+    if path in ["/parent/login", "/parent/logout", "/parent/register"]:
+        return await call_next(request)
+    if path.startswith("/parent/"):
+        if request.cookies.get("parent_session"):
+            return await call_next(request)
+        return RedirectResponse(url="/parent/login", status_code=303)
 
     # Admin routes: own login/logout always public
     if path in ["/login", "/logout"]:
@@ -1603,12 +1614,31 @@ def backup_csv():
 @app.get("/admin")
 def admin_panel():
     content = """
-<div class="card" style="max-width:480px;">
-  <h2>🔐 Admin Panel</h2>
-  <p style="color:var(--muted);margin-bottom:18px;font-size:13px;">Backup and restore your studio data.</p>
-  <div style="display:flex;gap:10px;flex-wrap:wrap;">
-    <a href="/api/backup" class="btn">📥 JSON Backup</a>
-    <a href="/api/backup/csv" class="btn btn-outline">📦 CSV Backup (ZIP)</a>
+<div class="two-col">
+  <div class="card">
+    <h2>🔐 Data & Backup</h2>
+    <p style="color:var(--muted);margin-bottom:18px;font-size:13px;">Backup and restore your studio data.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <a href="/api/backup" class="btn">📥 JSON Backup</a>
+      <a href="/api/backup/csv" class="btn btn-outline">📦 CSV Backup (ZIP)</a>
+    </div>
+  </div>
+  <div class="card">
+    <h2>📝 Lesson Notes</h2>
+    <p style="color:var(--muted);margin-bottom:18px;font-size:13px;">Add notes and assignments after each lesson. Parents can view these in their portal.</p>
+    <a href="/admin/lesson-notes" class="btn">📝 Manage Notes</a>
+  </div>
+</div>
+<div class="two-col">
+  <div class="card">
+    <h2>🚫 Cancellation Requests</h2>
+    <p style="color:var(--muted);margin-bottom:18px;font-size:13px;">Review and respond to date-blocking requests submitted by parents.</p>
+    <a href="/admin/blocked-dates" class="btn btn-warning">🚫 View Requests</a>
+  </div>
+  <div class="card">
+    <h2>👨‍👩‍👧 Parent Accounts</h2>
+    <p style="color:var(--muted);margin-bottom:18px;font-size:13px;">Parents can register and manage their child's lessons at the parent portal.</p>
+    <a href="/parent/login" class="btn btn-outline" target="_blank">👁️ View Parent Portal</a>
   </div>
 </div>"""
     return HTMLResponse(page("Admin", content, "admin"))
@@ -2462,6 +2492,1021 @@ def student_payments(request: Request):
 def serve_css():
     """Serve the CSS file"""
     return Response(content=css_content, media_type="text/css")
+
+
+# ─── Parent Portal ────────────────────────────────────────────────────────────
+
+PARENTS_FILE = "/data/parents.csv"
+PARENT_HEADERS = ["id", "name", "email", "password_hash", "student_names", "created_at"]
+
+BLOCKED_DATES_FILE = "/data/blocked_dates.csv"
+BLOCKED_DATES_HEADERS = ["id", "student_name", "date", "reason", "status", "parent_email", "created_at"]
+
+LESSON_NOTES_FILE = "/data/lesson_notes.csv"
+LESSON_NOTES_HEADERS = ["id", "student_name", "lesson_date", "notes", "assignment", "created_by", "created_at"]
+
+for _fp, _hdr in [
+    (PARENTS_FILE, PARENT_HEADERS),
+    (BLOCKED_DATES_FILE, BLOCKED_DATES_HEADERS),
+    (LESSON_NOTES_FILE, LESSON_NOTES_HEADERS),
+]:
+    if not os.path.exists(_fp):
+        with open(_fp, 'w', newline='') as _f:
+            csv.writer(_f).writerow(_hdr)
+
+
+def get_all_parents():
+    rows = []
+    if os.path.exists(PARENTS_FILE):
+        with open(PARENTS_FILE, 'r') as f:
+            for row in csv.DictReader(f):
+                rows.append(dict(row))
+    return rows
+
+
+def save_all_parents(parents):
+    with open(PARENTS_FILE, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=PARENT_HEADERS)
+        writer.writeheader()
+        for p in parents:
+            writer.writerow({k: p.get(k, '') for k in PARENT_HEADERS})
+
+
+def get_blocked_dates():
+    rows = []
+    if os.path.exists(BLOCKED_DATES_FILE):
+        with open(BLOCKED_DATES_FILE, 'r') as f:
+            for row in csv.DictReader(f):
+                rows.append(dict(row))
+    return rows
+
+
+def save_blocked_dates(rows):
+    with open(BLOCKED_DATES_FILE, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=BLOCKED_DATES_HEADERS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: row.get(k, '') for k in BLOCKED_DATES_HEADERS})
+
+
+def get_lesson_notes():
+    rows = []
+    if os.path.exists(LESSON_NOTES_FILE):
+        with open(LESSON_NOTES_FILE, 'r') as f:
+            for row in csv.DictReader(f):
+                rows.append(dict(row))
+    return rows
+
+
+def save_lesson_notes(rows):
+    with open(LESSON_NOTES_FILE, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=LESSON_NOTES_HEADERS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: row.get(k, '') for k in LESSON_NOTES_HEADERS})
+
+
+def _get_parent_email(request: Request) -> str:
+    return request.cookies.get("parent_session", "")
+
+
+def _get_parent(request: Request):
+    email = _get_parent_email(request)
+    if not email:
+        return None
+    parents = get_all_parents()
+    return next((p for p in parents if p.get('email', '').lower() == email.lower()), None)
+
+
+def _parent_students(parent: dict) -> list:
+    raw = parent.get('student_names', '')
+    return [s.strip() for s in raw.split(';') if s.strip()]
+
+
+def parent_page(title: str, content: str, parent_name: str, active: str = "dashboard") -> str:
+    links = [
+        ("dashboard", "/parent/dashboard", "🏠", "Dashboard"),
+        ("schedule",  "/parent/schedule",  "📅", "Schedule"),
+        ("notes",     "/parent/notes",     "📝", "Lesson Notes"),
+        ("invoices",  "/parent/invoices",  "🧾", "Invoices"),
+        ("payments",  "/parent/payments",  "💳", "Payments"),
+        ("profile",   "/parent/profile",   "👤", "My Profile"),
+    ]
+    nav_html = ""
+    for k, href, icon, label in links:
+        cls = "nav-link active" if k == active else "nav-link"
+        nav_html += f'<a href="{href}" class="{cls}"><span class="nav-icon">{icon}</span>{label}</a>\n'
+    initials = "".join(p[0].upper() for p in parent_name.split()[:2]) or "P"
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title} — Parent Portal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+:root{{--primary:#7c3aed;--primary-dark:#6d28d9;--secondary:#a855f7;}}
+.sidebar{{background:#3b0764;}}
+.nav-link.active{{background:linear-gradient(135deg,#7c3aed,#a855f7);box-shadow:0 2px 8px rgba(124,58,237,.4);}}
+</style>
+</head>
+<body>
+<div class="sidebar-overlay" id="overlay" onclick="closeSidebar()"></div>
+<div class="layout">
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <div class="brand-icon" style="background:linear-gradient(135deg,#7c3aed,#a855f7);font-size:14px;font-weight:800;">{initials}</div>
+    <div><div class="brand-name">{parent_name}</div><div class="brand-sub">Parent Portal</div></div>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-group">
+      <div class="nav-group-label">My Studio</div>
+      {nav_html}
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a href="/parent/logout" class="nav-link"><span class="nav-icon">🚪</span>Logout</a>
+  </div>
+</aside>
+<div class="main">
+  <header class="topbar">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <button class="menu-btn" onclick="openSidebar()">☰</button>
+      <span class="topbar-title">{title}</span>
+    </div>
+    <div class="topbar-right">
+      <span style="font-size:12px;color:var(--muted);padding:4px 10px;background:var(--bg);border-radius:20px;">🎵 Parent Portal</span>
+    </div>
+  </header>
+  <div class="page-body">
+    {content}
+  </div>
+</div>
+</div>
+<script>
+function openSidebar(){{document.getElementById('sidebar').classList.add('open');document.getElementById('overlay').classList.add('open');}}
+function closeSidebar(){{document.getElementById('sidebar').classList.remove('open');document.getElementById('overlay').classList.remove('open');}}
+</script>
+</body>
+</html>"""
+
+
+@app.get("/parent/login", response_class=HTMLResponse)
+def parent_login_page(error: str = "", success: str = ""):
+    err  = f'<div class="alert alert-danger">{error}</div>'   if error   else ''
+    succ = f'<div class="alert alert-success">{success}</div>' if success else ''
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Parent Portal — Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="login-logo" style="background:linear-gradient(135deg,#7c3aed,#a855f7);">👨‍👩‍👧</div>
+    <h1 style="text-align:center;margin-bottom:4px;">Parent Portal</h1>
+    <p style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:22px;">Manage your child's lessons, billing &amp; schedule</p>
+    {err}{succ}
+    <form action="/parent/login" method="post">
+      <div class="form-group">
+        <label class="form-label">Email Address</label>
+        <input type="email" name="email" placeholder="parent@email.com" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input type="password" name="password" placeholder="••••••••" required>
+      </div>
+      <button type="submit" class="btn" style="width:100%;justify-content:center;background:linear-gradient(135deg,#7c3aed,#a855f7);">Sign In</button>
+    </form>
+    <div style="margin-top:14px;text-align:center;">
+      <a href="/parent/register" style="font-size:12px;color:#7c3aed;">No account? Register here →</a>
+    </div>
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);display:flex;gap:16px;justify-content:center;">
+      <a href="/login" style="font-size:12px;color:var(--muted);">Staff login →</a>
+      <a href="/student/login" style="font-size:12px;color:var(--muted);">Student portal →</a>
+    </div>
+  </div>
+</div>
+</body>
+</html>""")
+
+
+@app.post("/parent/login")
+def parent_login_post(email: str = Form(...), password: str = Form(...)):
+    email = email.strip().lower()
+    pw_hash = hashlib.sha256(password.encode()).hexdigest()
+    parents = get_all_parents()
+    parent = next((p for p in parents if p.get('email', '').lower() == email and p.get('password_hash') == pw_hash), None)
+    if not parent:
+        return RedirectResponse(url="/parent/login?error=Invalid+email+or+password", status_code=303)
+    response = RedirectResponse(url="/parent/dashboard", status_code=303)
+    response.set_cookie(key="parent_session", value=email, httponly=True, max_age=86400 * 30)
+    return response
+
+
+@app.get("/parent/register", response_class=HTMLResponse)
+def parent_register_page(error: str = ""):
+    profiles = get_all_profiles()
+    err = f'<div class="alert alert-danger">{error}</div>' if error else ''
+    checkboxes = ""
+    for sname in sorted(profiles.keys()):
+        checkboxes += (
+            f'<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;'
+            f'cursor:pointer;border:1px solid var(--border);margin-bottom:6px;font-size:13px;">'
+            f'<input type="checkbox" name="students" value="{sname}" style="width:auto;margin:0;"> {sname}</label>'
+        )
+    if not checkboxes:
+        checkboxes = '<p style="color:var(--muted);font-size:13px;">No students registered yet. Please contact your instructor first.</p>'
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Register — Parent Portal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card" style="max-width:460px;">
+    <div class="login-logo" style="background:linear-gradient(135deg,#7c3aed,#a855f7);">👨‍👩‍👧</div>
+    <h1 style="text-align:center;margin-bottom:4px;">Create Account</h1>
+    <p style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:22px;">Parent / Guardian Registration</p>
+    {err}
+    <form action="/parent/register" method="post">
+      <div class="form-group">
+        <label class="form-label">Full Name</label>
+        <input type="text" name="name" placeholder="Your full name" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email Address</label>
+        <input type="email" name="email" placeholder="parent@email.com" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input type="password" name="password" placeholder="At least 8 characters" required minlength="8">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Confirm Password</label>
+        <input type="password" name="confirm_password" placeholder="Repeat password" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">My Child(ren) — select all that apply</label>
+        {checkboxes}
+      </div>
+      <button type="submit" class="btn" style="width:100%;justify-content:center;background:linear-gradient(135deg,#7c3aed,#a855f7);">Create Account</button>
+    </form>
+    <div style="margin-top:16px;text-align:center;border-top:1px solid var(--border);padding-top:14px;">
+      <a href="/parent/login" style="font-size:12px;color:#7c3aed;">Already have an account? Sign in →</a>
+    </div>
+  </div>
+</div>
+</body>
+</html>""")
+
+
+@app.post("/parent/register")
+async def parent_register_post(request: Request, name: str = Form(...), email: str = Form(...), password: str = Form(...), confirm_password: str = Form(...)):
+    form = await request.form()
+    students_selected = form.getlist("students")
+    email = email.strip().lower()
+
+    if password != confirm_password:
+        return RedirectResponse(url="/parent/register?error=Passwords+do+not+match", status_code=303)
+    if len(password) < 8:
+        return RedirectResponse(url="/parent/register?error=Password+must+be+at+least+8+characters", status_code=303)
+
+    parents = get_all_parents()
+    if any(p.get('email', '').lower() == email for p in parents):
+        return RedirectResponse(url="/parent/register?error=Email+already+registered", status_code=303)
+
+    if not students_selected:
+        return RedirectResponse(url="/parent/register?error=Please+select+at+least+one+student", status_code=303)
+
+    profiles = get_all_profiles()
+    valid_students = [s for s in students_selected if s in profiles]
+    if not valid_students:
+        return RedirectResponse(url="/parent/register?error=Selected+students+not+found", status_code=303)
+
+    new_id = max((int(p.get('id', 0)) for p in parents), default=0) + 1
+    parents.append({
+        'id': str(new_id),
+        'name': name.strip(),
+        'email': email,
+        'password_hash': hashlib.sha256(password.encode()).hexdigest(),
+        'student_names': ';'.join(valid_students),
+        'created_at': datetime.now().strftime('%Y-%m-%d'),
+    })
+    save_all_parents(parents)
+    return RedirectResponse(url="/parent/login?success=Account+created.+Please+sign+in.", status_code=303)
+
+
+@app.get("/parent/logout")
+def parent_logout():
+    response = RedirectResponse(url="/parent/login", status_code=303)
+    response.delete_cookie("parent_session")
+    return response
+
+
+@app.get("/parent/dashboard", response_class=HTMLResponse)
+def parent_dashboard(request: Request):
+    parent = _get_parent(request)
+    if not parent:
+        return RedirectResponse(url="/parent/login", status_code=303)
+
+    parent_name = parent.get('name', 'Parent')
+    my_students = _parent_students(parent)
+    profiles = get_all_profiles()
+    now = datetime.now()
+    total_balance = sum(profiles.get(s, {}).get('prepaid', 0) for s in my_students)
+
+    children_html = ""
+    for sname in my_students:
+        student = profiles.get(sname, {})
+        prepaid  = student.get('prepaid', 0)
+        rate     = student.get('rate', DEFAULT_RATE) or DEFAULT_RATE
+        lessons_remaining = int(prepaid / rate)
+
+        this_month_count = 0
+        if os.path.exists(LEDGER_FILE):
+            with open(LEDGER_FILE, 'r') as f:
+                for row in _ledger_reader(f):
+                    if row.get('Student') == sname and row.get('Status') in ('Confirmed', 'Attended'):
+                        try:
+                            d = datetime.strptime(row.get('Date', ''), '%Y-%m-%d')
+                            if d.year == now.year and d.month == now.month:
+                                this_month_count += 1
+                        except ValueError:
+                            pass
+
+        pending_blocks = [b for b in get_blocked_dates() if b.get('student_name') == sname and b.get('status') == 'pending']
+        initials  = ''.join(p[0].upper() for p in sname.split()[:2])
+        bal_color = 'var(--success)' if prepaid > 0 else 'var(--danger)'
+        pending_badge = f'<span class="badge badge-warning" style="margin-left:8px;">{len(pending_blocks)} pending</span>' if pending_blocks else ''
+
+        children_html += f"""
+<div class="card" style="margin-bottom:14px;">
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px;">
+    <div class="student-avatar" style="width:46px;height:46px;font-size:16px;">{initials}</div>
+    <div>
+      <div style="font-size:16px;font-weight:700;">{sname}{pending_badge}</div>
+      <div style="font-size:12px;color:var(--muted);">{student.get('description','') or 'Student'} &middot; ${rate:.0f}/lesson</div>
+    </div>
+  </div>
+  <div class="stats-row" style="margin-bottom:14px;">
+    <div class="stat-card" style="padding:12px;"><div class="stat-val" style="font-size:20px;color:{bal_color};">${prepaid:.2f}</div><div class="stat-lbl">Balance</div></div>
+    <div class="stat-card" style="padding:12px;"><div class="stat-val" style="font-size:20px;">{lessons_remaining}</div><div class="stat-lbl">Remaining</div></div>
+    <div class="stat-card" style="padding:12px;"><div class="stat-val" style="font-size:20px;">{this_month_count}</div><div class="stat-lbl">This Month</div></div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    <a href="/parent/schedule" class="btn btn-outline btn-sm">📅 Schedule</a>
+    <a href="/parent/notes" class="btn btn-outline btn-sm">📝 Notes</a>
+    <a href="/parent/invoices" class="btn btn-outline btn-sm">🧾 Invoices</a>
+  </div>
+</div>"""
+
+    if not children_html:
+        children_html = '<div class="alert alert-warning">No students linked to your account. Please contact your instructor.</div>'
+
+    all_notes = get_lesson_notes()
+    my_notes  = sorted([n for n in all_notes if n.get('student_name') in my_students],
+                        key=lambda x: x.get('lesson_date', ''), reverse=True)
+
+    recent_notes_html = ""
+    for note in my_notes[:3]:
+        recent_notes_html += f"""<div class="event-item">
+  <div class="event-name">📝 {note.get('student_name','')} — {note.get('lesson_date','')}</div>
+  <div class="event-meta" style="margin-top:4px;">{note.get('notes','')[:100]}</div>
+  {f'<div class="event-meta" style="margin-top:2px;color:var(--primary);">Assignment: {note.get("assignment","")}</div>' if note.get('assignment') else ''}
+</div>"""
+    if not recent_notes_html:
+        recent_notes_html = '<p style="color:var(--muted);font-size:13px;">No lesson notes yet.</p>'
+
+    content = f"""
+<div class="stats-row">
+  <div class="stat-card"><div class="stat-icon" style="background:#ede9fe;">👶</div>
+    <div class="stat-val">{len(my_students)}</div><div class="stat-lbl">Children</div></div>
+  <div class="stat-card"><div class="stat-icon" style="background:#d1fae5;">💰</div>
+    <div class="stat-val">${total_balance:.2f}</div><div class="stat-lbl">Total Balance</div></div>
+  <div class="stat-card"><div class="stat-icon" style="background:#e0e7ff;">📝</div>
+    <div class="stat-val">{len(my_notes)}</div><div class="stat-lbl">Lesson Notes</div></div>
+</div>
+<div class="two-col">
+  <div>
+    <h2 style="margin-bottom:14px;">My Children</h2>
+    {children_html}
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">📝 Recent Notes</h3>
+      <a href="/parent/notes" class="btn btn-outline btn-sm">All Notes</a>
+    </div>
+    {recent_notes_html}
+  </div>
+</div>"""
+    return HTMLResponse(parent_page(f"Welcome, {parent_name}!", content, parent_name, "dashboard"))
+
+
+@app.get("/parent/schedule", response_class=HTMLResponse)
+def parent_schedule(request: Request, msg: str = ""):
+    parent = _get_parent(request)
+    if not parent:
+        return RedirectResponse(url="/parent/login", status_code=303)
+
+    parent_name = parent.get('name', 'Parent')
+    my_students = _parent_students(parent)
+    profiles    = get_all_profiles()
+    msg_html    = f'<div class="alert alert-success">{msg}</div>' if msg else ''
+
+    all_blocked = get_blocked_dates()
+    my_blocked  = sorted([b for b in all_blocked if b.get('student_name') in my_students],
+                          key=lambda x: x.get('date', ''), reverse=True)
+
+    student_options = "".join(f'<option value="{s}">{s}</option>' for s in my_students)
+
+    blocked_rows = ""
+    for b in my_blocked:
+        status = b.get('status', 'pending')
+        badge_cls = 'badge-warning' if status == 'pending' else ('badge-success' if status == 'approved' else 'badge-danger')
+        blocked_rows += f"""<tr>
+  <td><strong>{b.get('student_name','')}</strong></td>
+  <td>{b.get('date','')}</td>
+  <td style="font-size:12px;color:var(--muted);">{b.get('reason','')[:60]}</td>
+  <td><span class="badge {badge_cls}">{status}</span></td>
+</tr>"""
+    if not blocked_rows:
+        blocked_rows = '<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:20px;">No requests submitted yet.</td></tr>'
+
+    upcoming_rows = ""
+    try:
+        import pytz
+        service = get_calendar_service()
+        if service:
+            tz     = pytz.timezone('America/New_York')
+            now_tz = datetime.now(tz)
+            events = service.events().list(
+                calendarId='primary',
+                timeMin=now_tz.astimezone(pytz.UTC).isoformat(),
+                timeMax=(now_tz + timedelta(days=90)).astimezone(pytz.UTC).isoformat(),
+                singleEvents=True, orderBy='startTime',
+            ).execute().get('items', [])
+            for e in events:
+                for sname in my_students:
+                    student_data = profiles.get(sname, {})
+                    if matches_student(e.get('summary', ''), sname, student_data.get('aliases', [])):
+                        st = e.get('start', {}).get('dateTime', '')
+                        try:
+                            dt_local = datetime.fromisoformat(st.replace('Z', '+00:00')).astimezone(tz)
+                            date_val = dt_local.strftime('%Y-%m-%d')
+                            display  = dt_local.strftime('%a, %b %-d')
+                        except Exception:
+                            date_val = st[:10]
+                            display  = date_val
+                        upcoming_rows += f"""<tr>
+  <td>{sname}</td>
+  <td>{display} — {format_standard_time(st)}</td>
+  <td>
+    <form action="/parent/block-date" method="post" style="display:inline;">
+      <input type="hidden" name="student_name" value="{sname}">
+      <input type="hidden" name="date" value="{date_val}">
+      <input type="hidden" name="reason" value="Parent requested cancellation">
+      <button type="submit" class="btn btn-warning btn-sm" onclick="return confirm('Request cancellation for this lesson?')">🚫 Request Cancel</button>
+    </form>
+  </td>
+</tr>"""
+    except Exception:
+        pass
+
+    if not upcoming_rows:
+        upcoming_rows = '<tr><td colspan="3" style="text-align:center;color:var(--muted);padding:20px;">No upcoming lessons found in calendar.</td></tr>'
+
+    content = f"""{msg_html}
+<div class="two-col">
+  <div>
+    <div class="card">
+      <h2>📅 Upcoming Lessons</h2>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px;">Click "Request Cancel" to notify your instructor of a conflict.</p>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead><tr><th>Student</th><th>Lesson</th><th>Action</th></tr></thead>
+          <tbody>{upcoming_rows}</tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h2>🚫 Block a Date</h2>
+      <p style="color:var(--muted);font-size:12px;margin-bottom:14px;">Submit a cancellation request or mark a date unavailable.</p>
+      <form action="/parent/block-date" method="post">
+        <div class="form-group"><label class="form-label">Student</label>
+          <select name="student_name" required>
+            <option value="">Select student…</option>
+            {student_options}
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">Date</label>
+          <input type="date" name="date" required>
+        </div>
+        <div class="form-group"><label class="form-label">Reason (optional)</label>
+          <input type="text" name="reason" placeholder="e.g. Family vacation, sick day">
+        </div>
+        <button type="submit" class="btn btn-warning">🚫 Submit Request</button>
+      </form>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">📋 Cancellation Requests</h3>
+    </div>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Student</th><th>Date</th><th>Reason</th><th>Status</th></tr></thead>
+        <tbody>{blocked_rows}</tbody>
+      </table>
+    </div>
+  </div>
+</div>"""
+    return HTMLResponse(parent_page("Schedule & Cancellations", content, parent_name, "schedule"))
+
+
+@app.post("/parent/block-date")
+def parent_block_date(request: Request, student_name: str = Form(...), date: str = Form(...), reason: str = Form("")):
+    parent = _get_parent(request)
+    if not parent:
+        return RedirectResponse(url="/parent/login", status_code=303)
+    if student_name not in _parent_students(parent):
+        return RedirectResponse(url="/parent/schedule", status_code=303)
+
+    rows   = get_blocked_dates()
+    new_id = max((int(r.get('id', 0)) for r in rows), default=0) + 1
+    rows.append({
+        'id': str(new_id),
+        'student_name': student_name,
+        'date': date,
+        'reason': reason or 'Parent requested cancellation',
+        'status': 'pending',
+        'parent_email': parent.get('email', ''),
+        'created_at': datetime.now().strftime('%Y-%m-%d'),
+    })
+    save_blocked_dates(rows)
+    return RedirectResponse(url="/parent/schedule?msg=Cancellation+request+submitted.+Your+instructor+will+review+it.", status_code=303)
+
+
+@app.get("/parent/notes", response_class=HTMLResponse)
+def parent_notes(request: Request):
+    parent = _get_parent(request)
+    if not parent:
+        return RedirectResponse(url="/parent/login", status_code=303)
+
+    parent_name = parent.get('name', 'Parent')
+    my_students = _parent_students(parent)
+
+    all_notes = get_lesson_notes()
+    my_notes  = sorted([n for n in all_notes if n.get('student_name') in my_students],
+                        key=lambda x: x.get('lesson_date', ''), reverse=True)
+
+    notes_html = ""
+    for note in my_notes:
+        notes_html += f"""
+<div class="card" style="margin-bottom:14px;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+    <div>
+      <strong style="font-size:14px;">{note.get('student_name','')}</strong>
+      <span style="color:var(--muted);font-size:12px;margin-left:10px;">📅 {note.get('lesson_date','')}</span>
+    </div>
+    <span style="font-size:11px;color:var(--muted);">By {note.get('created_by','Instructor')}</span>
+  </div>
+  <div style="background:var(--bg);border-radius:9px;padding:14px;font-size:13px;line-height:1.7;">
+    {note.get('notes','').replace(chr(10), '<br>')}
+  </div>
+  {f'<div style="margin-top:10px;padding:10px 14px;background:#e0e7ff;border-radius:8px;font-size:12px;"><strong>📌 Assignment:</strong> {note.get("assignment","")}</div>' if note.get('assignment') else ''}
+</div>"""
+
+    if not notes_html:
+        notes_html = '<div class="card"><p style="color:var(--muted);text-align:center;padding:30px;">No lesson notes yet. Notes will appear here after each lesson.</p></div>'
+
+    content = f"""
+<div style="margin-bottom:18px;">
+  <h2>📝 Lesson Notes</h2>
+  <p style="color:var(--muted);font-size:13px;margin-top:4px;">{len(my_notes)} note(s) for {', '.join(my_students) or 'your students'}</p>
+</div>
+{notes_html}"""
+    return HTMLResponse(parent_page("Lesson Notes", content, parent_name, "notes"))
+
+
+@app.get("/parent/invoices", response_class=HTMLResponse)
+def parent_invoices(request: Request):
+    parent = _get_parent(request)
+    if not parent:
+        return RedirectResponse(url="/parent/login", status_code=303)
+
+    parent_name = parent.get('name', 'Parent')
+    my_students = _parent_students(parent)
+
+    all_invoices = get_all_invoices()
+    my_invoices  = sorted(
+        [inv for inv in all_invoices if inv.get('Student') in my_students],
+        key=lambda x: (x.get('Year', ''), x.get('Month', '').zfill(2)), reverse=True
+    )
+
+    unpaid = [i for i in my_invoices if i.get('Status') == 'Unpaid']
+    paid   = [i for i in my_invoices if i.get('Status') == 'Paid']
+    total_outstanding = sum(float(i.get('BalanceDue', 0)) for i in unpaid)
+
+    rows = ""
+    for inv in my_invoices:
+        m = int(inv.get('Month', 1))
+        month_label = f"{MONTH_NAMES[m]} {inv.get('Year','')}"
+        status  = inv.get('Status', 'Unpaid')
+        badge   = 'badge-success' if status == 'Paid' else 'badge-warning'
+        balance = float(inv.get('BalanceDue', 0))
+        bal_style = 'color:var(--success);' if balance <= 0 else 'color:var(--danger);font-weight:700;'
+        rows += f"""<tr>
+  <td><strong>#INV-{inv.get('ID','').zfill(4)}</strong></td>
+  <td>{inv.get('Student','')}</td>
+  <td>{month_label}</td>
+  <td>{inv.get('LessonsCount',0)}</td>
+  <td>${float(inv.get('TotalAmount',0)):.2f}</td>
+  <td style="{bal_style}">${balance:.2f}</td>
+  <td><span class="badge {badge}">{status}</span></td>
+</tr>"""
+
+    if not rows:
+        rows = '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:24px;">No invoices yet.</td></tr>'
+
+    outstanding_card = ""
+    if total_outstanding > 0:
+        outstanding_card = f"""
+<div class="card" style="border:2px solid var(--danger);margin-top:0;">
+  <h3 style="color:var(--danger);margin-bottom:10px;">💳 Outstanding Balance: ${total_outstanding:.2f}</h3>
+  <p style="color:var(--muted);font-size:13px;margin-bottom:14px;">Contact your instructor to make a payment or use the payment request form.</p>
+  <a href="/parent/payments" class="btn btn-success">💳 Make Payment Request</a>
+</div>"""
+
+    content = f"""
+<div class="stats-row">
+  <div class="stat-card"><div class="stat-icon" style="background:#e0e7ff;">🧾</div>
+    <div class="stat-val">{len(my_invoices)}</div><div class="stat-lbl">Total Invoices</div></div>
+  <div class="stat-card"><div class="stat-icon" style="background:#fee2e2;">⏳</div>
+    <div class="stat-val">{len(unpaid)}</div><div class="stat-lbl">Unpaid</div></div>
+  <div class="stat-card"><div class="stat-icon" style="background:#d1fae5;">✅</div>
+    <div class="stat-val">{len(paid)}</div><div class="stat-lbl">Paid</div></div>
+  <div class="stat-card"><div class="stat-icon" style="background:#fef3c7;">💰</div>
+    <div class="stat-val">${total_outstanding:.2f}</div><div class="stat-lbl">Outstanding</div></div>
+</div>
+{outstanding_card}
+<div class="card">
+  <div class="card-header"><h2 style="margin:0;">🧾 Your Invoices</h2></div>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Invoice</th><th>Student</th><th>Period</th><th>Lessons</th><th>Total</th><th>Balance Due</th><th>Status</th></tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+  </div>
+</div>"""
+    return HTMLResponse(parent_page("Invoices", content, parent_name, "invoices"))
+
+
+@app.get("/parent/payments", response_class=HTMLResponse)
+def parent_payments(request: Request, msg: str = ""):
+    parent = _get_parent(request)
+    if not parent:
+        return RedirectResponse(url="/parent/login", status_code=303)
+
+    parent_name = parent.get('name', 'Parent')
+    my_students = _parent_students(parent)
+    profiles    = get_all_profiles()
+    msg_html    = f'<div class="alert alert-success">{msg}</div>' if msg else ''
+
+    balance_cards = ""
+    student_options = ""
+    for sname in my_students:
+        student = profiles.get(sname, {})
+        prepaid  = student.get('prepaid', 0)
+        rate     = student.get('rate', DEFAULT_RATE) or DEFAULT_RATE
+        lessons_remaining = int(prepaid / rate)
+        bal_bg    = '#d1fae5' if prepaid > 0 else '#fee2e2'
+        bal_color = '#065f46' if prepaid > 0 else '#991b1b'
+        balance_cards += f"""
+<div class="stat-card">
+  <div class="stat-icon" style="background:{bal_bg};">💰</div>
+  <div class="stat-val" style="color:{bal_color};">${prepaid:.2f}</div>
+  <div class="stat-lbl">{sname} — {lessons_remaining} lesson{'s' if lessons_remaining != 1 else ''} left</div>
+</div>"""
+        student_options += f'<option value="{sname}">{sname} (Balance: ${prepaid:.2f})</option>'
+
+    content = f"""{msg_html}
+<div class="stats-row" style="margin-bottom:22px;">{balance_cards}</div>
+<div class="two-col">
+  <div class="card">
+    <h2>💳 Submit Payment Notification</h2>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:16px;">Let your instructor know you've sent a payment. They will confirm and update your balance.</p>
+    <form action="/parent/payments/request" method="post">
+      <div class="form-group"><label class="form-label">Student</label>
+        <select name="student_name" required>
+          <option value="">Select student…</option>
+          {student_options}
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Amount ($)</label>
+        <input type="number" step="0.01" name="amount" placeholder="0.00" required>
+      </div>
+      <div class="form-group"><label class="form-label">Payment Method</label>
+        <select name="method">
+          <option>Venmo</option><option>Zelle</option><option>Cash</option><option>Check</option><option>Other</option>
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Notes (optional)</label>
+        <input type="text" name="notes" placeholder="e.g. Monthly prepay for June">
+      </div>
+      <button type="submit" class="btn btn-success">💳 Submit Notification</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>ℹ️ How Payments Work</h2>
+    <div style="font-size:13px;line-height:2;color:var(--dark);">
+      <div>1. Submit a payment notification here</div>
+      <div>2. Send the payment via your chosen method</div>
+      <div>3. Your instructor confirms receipt</div>
+      <div>4. Your prepaid balance is updated</div>
+    </div>
+    <div class="alert alert-info" style="margin-top:16px;font-size:12px;">
+      Questions about billing? Contact your instructor directly.
+    </div>
+  </div>
+</div>"""
+    return HTMLResponse(parent_page("Payments", content, parent_name, "payments"))
+
+
+@app.post("/parent/payments/request")
+def parent_payment_request(request: Request, student_name: str = Form(...), amount: float = Form(...), method: str = Form(...), notes: str = Form("")):
+    parent = _get_parent(request)
+    if not parent:
+        return RedirectResponse(url="/parent/login", status_code=303)
+    if student_name not in _parent_students(parent):
+        return RedirectResponse(url="/parent/payments", status_code=303)
+    msg = f"Payment+notification+sent+for+{_url_encode(student_name,safe='')}+%E2%80%94+%24{amount:.2f}+via+{method}.+Your+instructor+will+confirm+receipt."
+    return RedirectResponse(url=f"/parent/payments?msg={msg}", status_code=303)
+
+
+@app.get("/parent/profile", response_class=HTMLResponse)
+def parent_profile_page(request: Request, msg: str = ""):
+    parent = _get_parent(request)
+    if not parent:
+        return RedirectResponse(url="/parent/login", status_code=303)
+
+    parent_name = parent.get('name', 'Parent')
+    my_students = _parent_students(parent)
+    msg_html    = f'<div class="alert alert-success">{msg}</div>' if msg else ''
+    profiles    = get_all_profiles()
+
+    checkboxes = ""
+    for sname in sorted(profiles.keys()):
+        checked = 'checked' if sname in my_students else ''
+        checkboxes += (
+            f'<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;'
+            f'cursor:pointer;border:1px solid var(--border);margin-bottom:6px;font-size:13px;">'
+            f'<input type="checkbox" name="students" value="{sname}" {checked} style="width:auto;margin:0;"> {sname}</label>'
+        )
+
+    content = f"""{msg_html}
+<div class="two-col">
+  <div class="card">
+    <h2>👤 Update Profile</h2>
+    <form action="/parent/profile" method="post">
+      <div class="form-group"><label class="form-label">Full Name</label>
+        <input type="text" name="name" value="{parent.get('name','')}" required>
+      </div>
+      <div class="form-group"><label class="form-label">Email Address</label>
+        <input type="email" value="{parent.get('email','')}" disabled style="background:#f9fafb;color:var(--muted);">
+        <div style="font-size:11px;color:var(--muted);margin-top:3px;">Email cannot be changed. Contact your instructor.</div>
+      </div>
+      <div class="form-group"><label class="form-label">My Children</label>
+        {checkboxes}
+      </div>
+      <button type="submit" class="btn">Save Changes</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>🔑 Change Password</h2>
+    <form action="/parent/change-password" method="post">
+      <div class="form-group"><label class="form-label">Current Password</label>
+        <input type="password" name="current_password" placeholder="Current password" required>
+      </div>
+      <div class="form-group"><label class="form-label">New Password</label>
+        <input type="password" name="new_password" placeholder="At least 8 characters" required minlength="8">
+      </div>
+      <div class="form-group"><label class="form-label">Confirm New Password</label>
+        <input type="password" name="confirm_password" placeholder="Repeat new password" required>
+      </div>
+      <button type="submit" class="btn">Update Password</button>
+    </form>
+  </div>
+</div>"""
+    return HTMLResponse(parent_page("My Profile", content, parent_name, "profile"))
+
+
+@app.post("/parent/profile")
+async def parent_profile_post(request: Request, name: str = Form(...)):
+    parent = _get_parent(request)
+    if not parent:
+        return RedirectResponse(url="/parent/login", status_code=303)
+
+    form = await request.form()
+    students_selected = form.getlist("students")
+    profiles = get_all_profiles()
+    valid_students = [s for s in students_selected if s in profiles]
+
+    parents = get_all_parents()
+    email   = parent.get('email', '')
+    for p in parents:
+        if p.get('email', '').lower() == email.lower():
+            p['name'] = name.strip()
+            if valid_students:
+                p['student_names'] = ';'.join(valid_students)
+            break
+    save_all_parents(parents)
+    return RedirectResponse(url="/parent/profile?msg=Profile+updated+successfully", status_code=303)
+
+
+@app.post("/parent/change-password")
+def parent_change_password(request: Request, current_password: str = Form(...), new_password: str = Form(...), confirm_password: str = Form(...)):
+    parent = _get_parent(request)
+    if not parent:
+        return RedirectResponse(url="/parent/login", status_code=303)
+
+    if new_password != confirm_password:
+        return RedirectResponse(url="/parent/profile?msg=New+passwords+do+not+match", status_code=303)
+    if hashlib.sha256(current_password.encode()).hexdigest() != parent.get('password_hash', ''):
+        return RedirectResponse(url="/parent/profile?msg=Current+password+is+incorrect", status_code=303)
+
+    parents = get_all_parents()
+    email   = parent.get('email', '')
+    for p in parents:
+        if p.get('email', '').lower() == email.lower():
+            p['password_hash'] = hashlib.sha256(new_password.encode()).hexdigest()
+            break
+    save_all_parents(parents)
+    return RedirectResponse(url="/parent/profile?msg=Password+updated+successfully", status_code=303)
+
+
+# ─── Admin: Lesson Notes ──────────────────────────────────────────────────────
+
+@app.get("/admin/lesson-notes", response_class=HTMLResponse)
+def admin_lesson_notes():
+    profiles = get_all_profiles()
+    student_options = "".join(f'<option value="{n}">{n}</option>' for n in sorted(profiles.keys()))
+
+    notes = sorted(get_lesson_notes(), key=lambda x: x.get('lesson_date', ''), reverse=True)
+    rows  = ""
+    for note in notes:
+        rows += f"""<tr>
+  <td><strong>{note.get('student_name','')}</strong></td>
+  <td>{note.get('lesson_date','')}</td>
+  <td style="font-size:12px;">{note.get('notes','')[:80]}{'…' if len(note.get('notes',''))>80 else ''}</td>
+  <td style="font-size:12px;color:var(--primary);">{note.get('assignment','') or '—'}</td>
+  <td>
+    <form action="/admin/lesson-notes/delete/{note.get('id','')}" method="post" style="display:inline;">
+      <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Delete this note?')">🗑️</button>
+    </form>
+  </td>
+</tr>"""
+    if not rows:
+        rows = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px;">No lesson notes yet.</td></tr>'
+
+    today = datetime.now().strftime('%Y-%m-%d')
+    content = f"""
+<div class="two-col">
+  <div class="card">
+    <h2>📝 Add Lesson Note</h2>
+    <form action="/admin/lesson-notes/add" method="post">
+      <div class="form-group"><label class="form-label">Student</label>
+        <select name="student_name" required>
+          <option value="">Select student…</option>
+          {student_options}
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Lesson Date</label>
+        <input type="date" name="lesson_date" value="{today}" required>
+      </div>
+      <div class="form-group"><label class="form-label">Notes</label>
+        <textarea name="notes" rows="5" style="width:100%;padding:9px 11px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;" placeholder="Lesson summary, what was covered, progress made…" required></textarea>
+      </div>
+      <div class="form-group"><label class="form-label">Assignment (optional)</label>
+        <input type="text" name="assignment" placeholder="e.g. Practice scales, review measures 1–8">
+      </div>
+      <button type="submit" class="btn">💾 Save Note</button>
+    </form>
+  </div>
+  <div class="card">
+    <div class="card-header"><h2 style="margin:0;">📋 All Notes</h2></div>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Student</th><th>Date</th><th>Notes</th><th>Assignment</th><th></th></tr></thead>
+        <tbody>{rows}</tbody>
+      </table>
+    </div>
+  </div>
+</div>"""
+    return HTMLResponse(page("Lesson Notes", content, "notes"))
+
+
+@app.post("/admin/lesson-notes/add")
+def admin_add_lesson_note(student_name: str = Form(...), lesson_date: str = Form(...), notes: str = Form(...), assignment: str = Form("")):
+    all_notes = get_lesson_notes()
+    new_id = max((int(n.get('id', 0)) for n in all_notes), default=0) + 1
+    all_notes.append({
+        'id': str(new_id),
+        'student_name': student_name,
+        'lesson_date': lesson_date,
+        'notes': notes,
+        'assignment': assignment,
+        'created_by': 'Instructor',
+        'created_at': datetime.now().strftime('%Y-%m-%d'),
+    })
+    save_lesson_notes(all_notes)
+    return RedirectResponse(url="/admin/lesson-notes", status_code=303)
+
+
+@app.post("/admin/lesson-notes/delete/{note_id}")
+def admin_delete_lesson_note(note_id: str):
+    notes = [n for n in get_lesson_notes() if n.get('id') != note_id]
+    save_lesson_notes(notes)
+    return RedirectResponse(url="/admin/lesson-notes", status_code=303)
+
+
+# ─── Admin: Cancellation Requests ────────────────────────────────────────────
+
+@app.get("/admin/blocked-dates", response_class=HTMLResponse)
+def admin_blocked_dates():
+    rows_data = sorted(get_blocked_dates(), key=lambda x: x.get('date', ''), reverse=True)
+    pending_count = sum(1 for b in rows_data if b.get('status') == 'pending')
+
+    rows = ""
+    for b in rows_data:
+        status = b.get('status', 'pending')
+        badge_cls = 'badge-warning' if status == 'pending' else ('badge-success' if status == 'approved' else 'badge-danger')
+        action_btns = ""
+        if status == 'pending':
+            action_btns = f"""
+<form action="/admin/blocked-dates/{b.get('id','')}/approve" method="post" style="display:inline;">
+  <button type="submit" class="btn btn-success btn-sm">✅ Approve</button>
+</form>
+<form action="/admin/blocked-dates/{b.get('id','')}/deny" method="post" style="display:inline;">
+  <button type="submit" class="btn btn-danger btn-sm">❌ Deny</button>
+</form>"""
+        rows += f"""<tr>
+  <td><strong>{b.get('student_name','')}</strong></td>
+  <td>{b.get('date','')}</td>
+  <td style="font-size:12px;color:var(--muted);">{b.get('reason','')}</td>
+  <td style="font-size:11px;color:var(--muted);">{b.get('parent_email','')}</td>
+  <td><span class="badge {badge_cls}">{status}</span></td>
+  <td>{action_btns}</td>
+</tr>"""
+    if not rows:
+        rows = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px;">No cancellation requests yet.</td></tr>'
+
+    pending_alert = f'<div class="alert alert-warning">⚠️ {pending_count} pending request(s) need your review.</div>' if pending_count > 0 else ''
+    content = f"""{pending_alert}
+<div class="card">
+  <div class="card-header">
+    <h2 style="margin:0;">🚫 Parent Cancellation Requests</h2>
+    <a href="/admin/blocked-dates" class="btn btn-outline btn-sm">🔄 Refresh</a>
+  </div>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Student</th><th>Date</th><th>Reason</th><th>Parent</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+  </div>
+</div>"""
+    return HTMLResponse(page("Cancellation Requests", content, "cancels"))
+
+
+@app.post("/admin/blocked-dates/{date_id}/approve")
+def admin_approve_blocked_date(date_id: str):
+    rows = get_blocked_dates()
+    for r in rows:
+        if r.get('id') == date_id:
+            r['status'] = 'approved'
+            break
+    save_blocked_dates(rows)
+    return RedirectResponse(url="/admin/blocked-dates", status_code=303)
+
+
+@app.post("/admin/blocked-dates/{date_id}/deny")
+def admin_deny_blocked_date(date_id: str):
+    rows = get_blocked_dates()
+    for r in rows:
+        if r.get('id') == date_id:
+            r['status'] = 'denied'
+            break
+    save_blocked_dates(rows)
+    return RedirectResponse(url="/admin/blocked-dates", status_code=303)
 
 
 if __name__ == "__main__":
