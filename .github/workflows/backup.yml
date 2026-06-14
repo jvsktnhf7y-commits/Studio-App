@@ -1,0 +1,32 @@
+name: Daily Database Backup
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # Runs at 2 AM every day
+  workflow_dispatch:  # Allows manual trigger from GitHub
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download backup from Render
+        run: |
+          curl -o "backup_$(date +'%Y%m%d_%H%M%S').json" \
+            https://studio-app-7y7z.onrender.com/api/backup
+
+      - name: Create backup directory
+        run: mkdir -p backups
+
+      - name: Move backup to folder
+        run: mv backup_*.json backups/
+
+      - name: Commit and push backup
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          git add backups/
+          git commit -m "Automated backup $(date +'%Y-%m-%d')" || echo "No changes to commit"
+          git push
