@@ -6,6 +6,7 @@ import csv
 from datetime import datetime, timedelta
 import hashlib
 import json
+from urllib.parse import quote as _url_encode, unquote as _url_decode
 from googleapiclient.discovery import build
 
 app = FastAPI(title="Studio App")
@@ -210,6 +211,68 @@ def page(title: str, content: str, active: str = "dashboard", extra_head: str = 
     </div>
     <div class="topbar-right">
       <a href="/dashboard" class="btn btn-ghost btn-sm">🏠</a>
+    </div>
+  </header>
+  <div class="page-body">
+    {content}
+  </div>
+</div>
+</div>
+<script>
+function openSidebar(){{document.getElementById('sidebar').classList.add('open');document.getElementById('overlay').classList.add('open');}}
+function closeSidebar(){{document.getElementById('sidebar').classList.remove('open');document.getElementById('overlay').classList.remove('open');}}
+</script>
+</body>
+</html>"""
+
+
+def student_page(title: str, content: str, student_name: str, active: str = "dashboard") -> str:
+    """Layout for the student-facing portal (green theme, limited nav)."""
+    links = [
+        ("dashboard", "/student/dashboard", "🏠", "My Dashboard"),
+        ("lessons",   "/student/lessons",   "📅",  "My Lessons"),
+        ("payments",  "/student/payments",  "💳",  "My Payments"),
+    ]
+    nav_html = ""
+    for k, href, icon, label in links:
+        cls = "nav-link active" if k == active else "nav-link"
+        nav_html += f'<a href="{href}" class="{cls}"><span class="nav-icon">{icon}</span>{label}</a>\n'
+    initials = "".join(p[0].upper() for p in student_name.split()[:2]) or "S"
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title} — Student Portal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="sidebar-overlay" id="overlay" onclick="closeSidebar()"></div>
+<div class="layout">
+<aside class="sidebar" id="sidebar" style="background:#064e3b;">
+  <div class="sidebar-brand">
+    <div class="brand-icon" style="background:linear-gradient(135deg,#10b981,#059669);font-size:14px;font-weight:800;">{initials}</div>
+    <div><div class="brand-name">{student_name}</div><div class="brand-sub">Student Portal</div></div>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-group">
+      <div class="nav-group-label">My Studio</div>
+      {nav_html}
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a href="/student/logout" class="nav-link"><span class="nav-icon">🚪</span>Logout</a>
+  </div>
+</aside>
+<div class="main">
+  <header class="topbar">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <button class="menu-btn" onclick="openSidebar()">☰</button>
+      <span class="topbar-title">{title}</span>
+    </div>
+    <div class="topbar-right">
+      <span style="font-size:12px;color:var(--muted);padding:4px 10px;background:var(--bg);border-radius:20px;">🎵 Student Portal</span>
     </div>
   </header>
   <div class="page-body">
@@ -693,6 +756,9 @@ def login_page(error: str = ""):
       </div>
       <button type="submit" class="btn" style="width:100%;justify-content:center;margin-top:4px;">Sign In</button>
     </form>
+    <div style="margin-top:24px;padding-top:18px;border-top:1px solid var(--border);text-align:center;">
+      <a href="/student/login" style="font-size:12px;color:var(--muted);">Student / Parent portal →</a>
+    </div>
   </div>
 </div>
 </body>
@@ -723,10 +789,24 @@ def root():
 # Auth middleware
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    if request.url.path in ["/login", "/logout", "/static", "/"]:
+    path = request.url.path
+
+    # Always public: static assets, root redirect
+    if path in ["/", "/static"] or path.startswith("/static/"):
         return await call_next(request)
-    session = request.cookies.get("session")
-    if session == "authenticated":
+
+    # Student portal: own login/logout are always public; other /student/* need student cookie
+    if path in ["/student/login", "/student/logout"]:
+        return await call_next(request)
+    if path.startswith("/student/"):
+        if request.cookies.get("student_session"):
+            return await call_next(request)
+        return RedirectResponse(url="/student/login", status_code=303)
+
+    # Admin routes: own login/logout always public
+    if path in ["/login", "/logout"]:
+        return await call_next(request)
+    if request.cookies.get("session") == "authenticated":
         return await call_next(request)
     return RedirectResponse(url="/login", status_code=303)
 
@@ -1963,6 +2043,419 @@ def mark_invoice_paid(invoice_id: str):
             break
     save_all_invoices(invoices)
     return RedirectResponse(url=f"/invoices/{invoice_id}", status_code=303)
+
+
+# ─── Student Portal ───────────────────────────────────────────────────────────
+
+def _get_student_name(request: Request) -> str:
+    """Decode the student name from the session cookie."""
+    return _url_decode(request.cookies.get("student_session", ""))
+
+
+@app.get("/student/login", response_class=HTMLResponse)
+def student_login_page(error: str = ""):
+    profiles = get_all_profiles()
+    err = f'<div class="alert alert-danger">{error}</div>' if error else ''
+    if profiles:
+        options = "".join(
+            f'<option value="{n}">{n}</option>'
+            for n in sorted(profiles.keys())
+        )
+        form_html = f"""
+    <form action="/student/login" method="post">
+      <div class="form-group">
+        <label class="form-label">Your Name</label>
+        <select name="student_name" required>
+          <option value="">Select your name…</option>
+          {options}
+        </select>
+      </div>
+      <button type="submit" class="btn" style="width:100%;justify-content:center;margin-top:4px;background:linear-gradient(135deg,#10b981,#059669);">
+        Enter Portal
+      </button>
+    </form>"""
+    else:
+        form_html = '<div class="alert alert-warning">No students are registered yet. Please contact your instructor.</div>'
+
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Student Portal — Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="login-logo" style="background:linear-gradient(135deg,#10b981,#059669);">🎵</div>
+    <h1 style="text-align:center;margin-bottom:4px;">Student Portal</h1>
+    <p style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:22px;">
+      View your lessons, balance, and history
+    </p>
+    {err}
+    {form_html}
+    <div style="margin-top:24px;padding-top:18px;border-top:1px solid var(--border);text-align:center;">
+      <a href="/login" style="font-size:12px;color:var(--muted);">Staff login →</a>
+    </div>
+  </div>
+</div>
+</body>
+</html>""")
+
+
+@app.post("/student/login")
+def student_login_post(student_name: str = Form(...)):
+    profiles = get_all_profiles()
+    if student_name not in profiles:
+        return RedirectResponse(url="/student/login?error=Name+not+found.+Please+select+your+name.", status_code=303)
+    response = RedirectResponse(url="/student/dashboard", status_code=303)
+    response.set_cookie(
+        key="student_session",
+        value=_url_encode(student_name, safe=""),
+        httponly=True,
+        max_age=86400,
+    )
+    return response
+
+
+@app.get("/student/logout")
+def student_logout():
+    response = RedirectResponse(url="/student/login", status_code=303)
+    response.delete_cookie("student_session")
+    return response
+
+
+@app.get("/student/dashboard", response_class=HTMLResponse)
+def student_dashboard(request: Request):
+    student_name = _get_student_name(request)
+    profiles = get_all_profiles()
+    student = profiles.get(student_name, {})
+    prepaid  = student.get("prepaid", 0)
+    rate     = student.get("rate", DEFAULT_RATE) or DEFAULT_RATE
+    lessons_remaining = int(prepaid / rate)
+
+    # All lessons for this student from the ledger
+    all_lessons = []
+    if os.path.exists(LEDGER_FILE):
+        with open(LEDGER_FILE, "r") as f:
+            for row in _ledger_reader(f):
+                if row.get("Student", "") == student_name:
+                    all_lessons.append(row)
+    all_lessons.sort(key=lambda x: x.get("Date", ""), reverse=True)
+
+    confirmed_total = sum(1 for l in all_lessons if l.get("Status") in ("Confirmed", "Attended"))
+    missed_total    = sum(1 for l in all_lessons if l.get("Status") in ("Missed", "No-Show"))
+
+    # This-month count
+    now = datetime.now()
+    this_month = sum(
+        1 for l in all_lessons
+        if l.get("Status") in ("Confirmed", "Attended")
+        and l.get("Date", "")[:7] == now.strftime("%Y-%m")
+    )
+
+    # Upcoming lessons from Google Calendar
+    upcoming_html = next_lesson_html = ""
+    try:
+        import pytz
+        service = get_calendar_service()
+        if service:
+            tz = pytz.timezone("America/New_York")
+            now_tz  = datetime.now(tz)
+            end_utc = (now_tz + timedelta(days=60)).astimezone(pytz.UTC).isoformat()
+            events  = service.events().list(
+                calendarId="primary",
+                timeMin=now_tz.astimezone(pytz.UTC).isoformat(),
+                timeMax=end_utc,
+                singleEvents=True, orderBy="startTime",
+            ).execute().get("items", [])
+            aliases    = student.get("aliases", [])
+            my_events  = [e for e in events if matches_student(e.get("summary", ""), student_name, aliases)]
+            if my_events:
+                first_st = my_events[0].get("start", {}).get("dateTime", "")
+                if first_st:
+                    try:
+                        st_dt  = datetime.fromisoformat(first_st.replace("Z", "+00:00")).astimezone(tz)
+                        days   = (st_dt.date() - now_tz.date()).days
+                        when   = "Today" if days == 0 else ("Tomorrow" if days == 1 else f"In {days} days")
+                        next_lesson_html = (
+                            f'<div class="alert alert-info" style="margin-bottom:18px;">'
+                            f'📅 Next lesson: <strong>{st_dt.strftime("%A, %B %-d")} at {format_standard_time(first_st)}</strong>'
+                            f' &mdash; {when}</div>'
+                        )
+                    except Exception:
+                        pass
+            for e in my_events[:4]:
+                st = e.get("start", {}).get("dateTime", "All day")
+                try:
+                    dt_local = datetime.fromisoformat(st.replace("Z", "+00:00")).astimezone(tz)
+                    date_str = dt_local.strftime("%a, %b %-d")
+                except Exception:
+                    date_str = st[:10]
+                upcoming_html += (
+                    f'<div class="event-item">'
+                    f'<div class="event-name">🎵 Lesson</div>'
+                    f'<div class="event-meta">{date_str} &middot; {format_standard_time(st)}</div>'
+                    f'</div>'
+                )
+    except Exception:
+        pass
+    if not upcoming_html:
+        upcoming_html = '<p style="color:var(--muted);font-size:13px;">No upcoming lessons found in calendar.</p>'
+
+    # Recent history rows
+    history_rows = ""
+    for l in all_lessons[:6]:
+        s = l.get("Status", "")
+        badge = "badge-success" if s in ("Confirmed", "Attended") else ("badge-danger" if s in ("Missed", "No-Show") else "badge-muted")
+        history_rows += (
+            f'<tr><td>{l.get("Date","")}</td>'
+            f'<td><span class="badge {badge}">{s}</span></td>'
+            f'<td>${_safe_float(l.get("AmountCharged", 0)):.2f}</td></tr>'
+        )
+    if not history_rows:
+        history_rows = '<tr><td colspan="3" style="text-align:center;color:var(--muted);padding:16px;">No lessons recorded yet.</td></tr>'
+
+    bal_color = "var(--success)" if prepaid > 0 else "var(--danger)"
+    content = f"""
+{next_lesson_html}
+<div class="stats-row">
+  <div class="stat-card">
+    <div class="stat-icon" style="background:#d1fae5;">💰</div>
+    <div class="stat-val" style="color:{bal_color};">${prepaid:.2f}</div>
+    <div class="stat-lbl">Prepaid Balance</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:#e0e7ff;">📚</div>
+    <div class="stat-val">{lessons_remaining}</div>
+    <div class="stat-lbl">Lessons Remaining</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:#d1fae5;">✅</div>
+    <div class="stat-val">{confirmed_total}</div>
+    <div class="stat-lbl">Lessons Completed</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:#fef3c7;">🗓️</div>
+    <div class="stat-val">{this_month}</div>
+    <div class="stat-lbl">This Month</div>
+  </div>
+</div>
+
+<div class="two-col">
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">📅 Upcoming Lessons</h3>
+      <a href="/student/lessons" class="btn btn-outline btn-sm">See All</a>
+    </div>
+    {upcoming_html}
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">📋 Recent History</h3>
+      <a href="/student/lessons" class="btn btn-outline btn-sm">Full History</a>
+    </div>
+    <table>
+      <thead><tr><th>Date</th><th>Status</th><th>Amount</th></tr></thead>
+      <tbody>{history_rows}</tbody>
+    </table>
+  </div>
+</div>
+"""
+    return HTMLResponse(student_page(f"Welcome, {student_name}!", content, student_name, "dashboard"))
+
+
+@app.get("/student/lessons", response_class=HTMLResponse)
+def student_lessons(request: Request):
+    student_name = _get_student_name(request)
+    profiles = get_all_profiles()
+    student  = profiles.get(student_name, {})
+    aliases  = student.get("aliases", [])
+
+    # All past lessons from ledger
+    all_lessons = []
+    if os.path.exists(LEDGER_FILE):
+        with open(LEDGER_FILE, "r") as f:
+            for row in _ledger_reader(f):
+                if row.get("Student", "") == student_name:
+                    all_lessons.append(row)
+    all_lessons.sort(key=lambda x: x.get("Date", ""), reverse=True)
+
+    # Upcoming from calendar (next 90 days)
+    upcoming_html = ""
+    try:
+        import pytz
+        service = get_calendar_service()
+        if service:
+            tz     = pytz.timezone("America/New_York")
+            now_tz = datetime.now(tz)
+            events = service.events().list(
+                calendarId="primary",
+                timeMin=now_tz.astimezone(pytz.UTC).isoformat(),
+                timeMax=(now_tz + timedelta(days=90)).astimezone(pytz.UTC).isoformat(),
+                singleEvents=True, orderBy="startTime",
+            ).execute().get("items", [])
+            for e in events:
+                if not matches_student(e.get("summary", ""), student_name, aliases):
+                    continue
+                st = e.get("start", {}).get("dateTime", "All day")
+                et = e.get("end",   {}).get("dateTime", "")
+                duration = 60
+                if st and "T" in st and et and "T" in et:
+                    try:
+                        duration = int((
+                            datetime.fromisoformat(et.replace("Z", "+00:00")) -
+                            datetime.fromisoformat(st.replace("Z", "+00:00"))
+                        ).total_seconds() / 60)
+                    except Exception:
+                        pass
+                try:
+                    dt_local = datetime.fromisoformat(st.replace("Z", "+00:00")).astimezone(tz)
+                    date_str = dt_local.strftime("%A, %B %-d, %Y")
+                except Exception:
+                    date_str = st[:10]
+                upcoming_html += (
+                    f'<div class="event-item">'
+                    f'<div class="event-name">🎵 {date_str}</div>'
+                    f'<div class="event-meta">{format_standard_time(st)} &middot; {duration} min</div>'
+                    f'</div>'
+                )
+    except Exception:
+        pass
+    if not upcoming_html:
+        upcoming_html = '<p style="color:var(--muted);font-size:13px;">No upcoming lessons found in calendar.</p>'
+
+    # History table
+    history_rows = ""
+    for l in all_lessons:
+        s = l.get("Status", "")
+        if s in ("Confirmed", "Attended"):
+            badge, emoji = "badge-success", "✅"
+        elif s in ("Missed", "No-Show"):
+            badge, emoji = "badge-danger", "❌"
+        elif s == "Cancelled":
+            badge, emoji = "badge-muted", "🔄"
+        else:
+            badge, emoji = "badge-warning", "⚠️"
+        note = (l.get("Notes", "") or "")[:55]
+        history_rows += (
+            f'<tr><td>{l.get("Date","")}</td>'
+            f'<td><span class="badge {badge}">{emoji} {s}</span></td>'
+            f'<td>${_safe_float(l.get("AmountCharged", 0)):.2f}</td>'
+            f'<td style="color:var(--muted);font-size:11px;">{note}</td></tr>'
+        )
+    if not history_rows:
+        history_rows = '<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:20px;">No lesson history yet.</td></tr>'
+
+    content = f"""
+<div class="card">
+  <div class="card-header"><h2 style="margin:0;">📅 Upcoming Lessons</h2></div>
+  {upcoming_html}
+</div>
+<div class="card">
+  <div class="card-header">
+    <h2 style="margin:0;">📋 Lesson History</h2>
+    <span style="color:var(--muted);font-size:12px;">{len(all_lessons)} total</span>
+  </div>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Date</th><th>Status</th><th>Amount</th><th>Notes</th></tr></thead>
+      <tbody>{history_rows}</tbody>
+    </table>
+  </div>
+</div>
+"""
+    return HTMLResponse(student_page("My Lessons", content, student_name, "lessons"))
+
+
+@app.get("/student/payments", response_class=HTMLResponse)
+def student_payments(request: Request):
+    student_name = _get_student_name(request)
+    profiles = get_all_profiles()
+    student  = profiles.get(student_name, {})
+    prepaid  = student.get("prepaid", 0)
+    rate     = student.get("rate", DEFAULT_RATE) or DEFAULT_RATE
+    target_minutes    = student.get("target_minutes", 60)
+    lessons_remaining = int(prepaid / rate)
+
+    # Charged lesson activity (proxy for account activity)
+    activity = []
+    if os.path.exists(LEDGER_FILE):
+        with open(LEDGER_FILE, "r") as f:
+            for row in _ledger_reader(f):
+                if row.get("Student", "") == student_name and _safe_float(row.get("AmountCharged", 0)) > 0:
+                    activity.append(row)
+    activity.sort(key=lambda x: x.get("Date", ""), reverse=True)
+    total_charged = sum(_safe_float(r.get("AmountCharged", 0)) for r in activity)
+
+    activity_rows = ""
+    for r in activity:
+        s = r.get("Status", "")
+        badge = "badge-success" if s in ("Confirmed", "Attended") else "badge-danger"
+        note  = (r.get("Notes", "") or "")[:55]
+        activity_rows += (
+            f'<tr><td>{r.get("Date","")}</td>'
+            f'<td><span class="badge {badge}">{s}</span></td>'
+            f'<td style="font-weight:600;color:var(--danger);">−${_safe_float(r.get("AmountCharged",0)):.2f}</td>'
+            f'<td style="color:var(--muted);font-size:11px;">{note}</td></tr>'
+        )
+    if not activity_rows:
+        activity_rows = '<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:20px;">No charges yet.</td></tr>'
+
+    bal_bg    = "#d1fae5" if prepaid > 0 else "#fee2e2"
+    bal_color = "#065f46" if prepaid > 0 else "#991b1b"
+
+    content = f"""
+<div class="stats-row">
+  <div class="stat-card">
+    <div class="stat-icon" style="background:{bal_bg};">💰</div>
+    <div class="stat-val" style="color:{bal_color};">${prepaid:.2f}</div>
+    <div class="stat-lbl">Current Balance</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:#e0e7ff;">📚</div>
+    <div class="stat-val">{lessons_remaining}</div>
+    <div class="stat-lbl">Lessons Remaining</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:#fef3c7;">💲</div>
+    <div class="stat-val">${rate:.0f}</div>
+    <div class="stat-lbl">Per Lesson ({target_minutes} min)</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:#fee2e2;">📊</div>
+    <div class="stat-val">${total_charged:.0f}</div>
+    <div class="stat-lbl">Total Charged</div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>💳 Account Balance</h2>
+  <div style="background:{bal_bg};border-radius:12px;padding:24px;text-align:center;margin-bottom:14px;">
+    <div style="font-size:44px;font-weight:800;color:{bal_color};">${prepaid:.2f}</div>
+    <div style="color:{bal_color};font-size:14px;margin-top:8px;">
+      {lessons_remaining} lesson{"s" if lessons_remaining != 1 else ""} remaining at ${rate:.0f}/lesson
+    </div>
+  </div>
+  <p style="color:var(--muted);font-size:12px;">To add funds to your account, please contact your instructor.</p>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h2 style="margin:0;">📋 Lesson Charges</h2>
+    <span style="color:var(--muted);font-size:12px;">{len(activity)} lessons charged</span>
+  </div>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Date</th><th>Status</th><th>Charged</th><th>Notes</th></tr></thead>
+      <tbody>{activity_rows}</tbody>
+    </table>
+  </div>
+</div>
+"""
+    return HTMLResponse(student_page("My Payments", content, student_name, "payments"))
 
 
 @app.get("/static/style.css")
