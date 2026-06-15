@@ -234,6 +234,11 @@ with open("static/style.css", "w") as f:
     f.write(css_content)
 
 
+@app.get("/static/style.css")
+def serve_css():
+    return Response(content=css_content, media_type="text/css")
+
+
 def page(title: str, content: str, active: str = "dashboard") -> str:
     """Render a full page with the dark sidebar layout."""
     links = [
