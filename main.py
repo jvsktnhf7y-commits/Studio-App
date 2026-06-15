@@ -12,30 +12,132 @@ from googleapiclient.discovery import build
 
 try:
     import stripe as _stripe
-    _stripe.api_key      = os.environ.get('STRIPE_SECRET_KEY', '')
-    STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
-    STRIPE_PRICE_MONTHLY  = os.environ.get('STRIPE_PRICE_MONTHLY', '')
-    _STRIPE_READY         = bool(_stripe.api_key)
+    _stripe.api_key        = os.environ.get('STRIPE_SECRET_KEY', '')
+    STRIPE_PUBLISHABLE_KEY = os.environ.get('STRIPE_PUBLISHABLE_KEY', '')
+    STRIPE_WEBHOOK_SECRET  = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
+    STRIPE_PRICE_MONTHLY   = os.environ.get('STRIPE_PRICE_MONTHLY', '')
+    _STRIPE_READY          = bool(_stripe.api_key)
 except ImportError:
-    _stripe               = None  # type: ignore
-    STRIPE_WEBHOOK_SECRET = ''
-    STRIPE_PRICE_MONTHLY  = ''
-    _STRIPE_READY         = False
+    _stripe                = None  # type: ignore
+    STRIPE_PUBLISHABLE_KEY = ''
+    STRIPE_WEBHOOK_SECRET  = ''
+    STRIPE_PRICE_MONTHLY   = ''
+    _STRIPE_READY          = False
 
-SUBSCRIPTION_FILE = 'stripe_subscription.json'
+# ── Subscriptions CSV ─────────────────────────────────────────────────────────
+SUBSCRIPTIONS_FILE    = 'subscriptions.csv'
+PROCESSED_EVENTS_FILE = 'processed_stripe_events.json'
+_SUB_HEADERS = [
+    'user_key', 'stripe_customer_id', 'stripe_subscription_id',
+    'subscription_status', 'current_period_end', 'cancel_at_period_end',
+]
+_SUB_DEFAULTS = {
+    'user_key': 'admin', 'stripe_customer_id': '', 'stripe_subscription_id': '',
+    'subscription_status': 'none', 'current_period_end': '', 'cancel_at_period_end': 'false',
+}
 
-def _get_subscription() -> dict:
-    if os.path.exists(SUBSCRIPTION_FILE):
+if not os.path.exists(SUBSCRIPTIONS_FILE):
+    with open(SUBSCRIPTIONS_FILE, 'w', newline='') as _f:
+        csv.DictWriter(_f, fieldnames=_SUB_HEADERS).writeheader()
+
+
+def _sub_get(user_key: str = 'admin') -> dict:
+    if os.path.exists(SUBSCRIPTIONS_FILE):
+        with open(SUBSCRIPTIONS_FILE) as f:
+            for row in csv.DictReader(f):
+                if row.get('user_key') == user_key:
+                    return dict(row)
+    return dict(_SUB_DEFAULTS, user_key=user_key)
+
+
+def _sub_save(data: dict):
+    user_key = data.get('user_key', 'admin')
+    rows, found = [], False
+    if os.path.exists(SUBSCRIPTIONS_FILE):
+        with open(SUBSCRIPTIONS_FILE) as f:
+            for row in csv.DictReader(f):
+                if row.get('user_key') == user_key:
+                    rows.append({**_SUB_DEFAULTS, **row, **data})
+                    found = True
+                else:
+                    rows.append(dict(row))
+    if not found:
+        rows.append({**_SUB_DEFAULTS, **data})
+    with open(SUBSCRIPTIONS_FILE, 'w', newline='') as f:
+        w = csv.DictWriter(f, fieldnames=_SUB_HEADERS)
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: r.get(k, '') for k in _SUB_HEADERS})
+
+
+def _event_processed(event_id: str) -> bool:
+    if os.path.exists(PROCESSED_EVENTS_FILE):
         try:
-            with open(SUBSCRIPTION_FILE) as f:
-                return json.load(f)
+            with open(PROCESSED_EVENTS_FILE) as f:
+                return event_id in json.load(f)
         except Exception:
             pass
-    return {'status': 'none', 'customer_id': '', 'subscription_id': ''}
+    return False
 
-def _save_subscription(data: dict):
-    with open(SUBSCRIPTION_FILE, 'w') as f:
-        json.dump(data, f, indent=2)
+
+def _mark_event(event_id: str):
+    events = {}
+    if os.path.exists(PROCESSED_EVENTS_FILE):
+        try:
+            with open(PROCESSED_EVENTS_FILE) as f:
+                events = json.load(f)
+        except Exception:
+            pass
+    events[event_id] = datetime.now().isoformat()
+    if len(events) > 1000:
+        events = dict(list(events.items())[-1000:])
+    with open(PROCESSED_EVENTS_FILE, 'w') as f:
+        json.dump(events, f)
+
+
+def _fetch_stripe_data(sub: dict) -> dict:
+    """Fetch live subscription/invoice data from Stripe. Safe defaults on any failure."""
+    result = {
+        'payment_method': None,
+        'next_billing_date': None,
+        'cancel_at_period_end': sub.get('cancel_at_period_end', 'false') == 'true',
+        'invoices': [],
+    }
+    if not _STRIPE_READY:
+        return result
+    customer_id = sub.get('stripe_customer_id', '')
+    sub_id      = sub.get('stripe_subscription_id', '')
+    if sub_id:
+        try:
+            s = _stripe.Subscription.retrieve(sub_id, expand=['default_payment_method'])
+            period_end = s.get('current_period_end')
+            if period_end:
+                result['next_billing_date'] = datetime.fromtimestamp(int(period_end)).strftime('%B %d, %Y')
+            result['cancel_at_period_end'] = bool(s.get('cancel_at_period_end', False))
+            pm = s.get('default_payment_method') or {}
+            if isinstance(pm, dict) and pm.get('card'):
+                c = pm['card']
+                result['payment_method'] = {
+                    'brand': c.get('brand', '').title(),
+                    'last4': c.get('last4', ''),
+                    'exp':   f"{c.get('exp_month','')}/{c.get('exp_year','')}",
+                }
+        except Exception:
+            pass
+    if customer_id:
+        try:
+            for inv in _stripe.Invoice.list(customer=customer_id, limit=10).data:
+                created = inv.get('created', 0)
+                result['invoices'].append({
+                    'date':   datetime.fromtimestamp(int(created)).strftime('%b %d, %Y') if created else '—',
+                    'amount': f"${inv.get('amount_paid', 0) / 100:.2f}",
+                    'status': inv.get('status', '').title(),
+                    'url':    inv.get('hosted_invoice_url', ''),
+                    'pdf':    inv.get('invoice_pdf', ''),
+                })
+        except Exception:
+            pass
+    return result
 
 app = FastAPI(title="Studio App")
 
@@ -232,20 +334,34 @@ def root():
     return RedirectResponse(url="/dashboard", status_code=303)
 
 # Auth middleware
+_PUBLIC_PATHS    = frozenset(["/login", "/logout", "/", "/test"])
+_BILLING_PATHS   = frozenset(["/billing", "/create-checkout-session",
+                               "/billing/portal", "/billing/cancel"])
+
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
-    # Stripe webhook must be fully public — called by Stripe servers, not the browser
+
+    # Stripe webhook: fully public — Stripe servers POST here, no cookie possible
     if path == '/webhook/stripe':
         return await call_next(request)
-    if path in ["/login", "/logout", "/static", "/"]:
+
+    if path in _PUBLIC_PATHS or path.startswith("/static/"):
         return await call_next(request)
-    if path.startswith("/static/"):
+
+    # All other paths require an authenticated session
+    if request.cookies.get("session") != "authenticated":
+        return RedirectResponse(url="/login", status_code=303)
+
+    # Billing paths: authenticated users can always reach them (that's where they subscribe)
+    if path in _BILLING_PATHS:
         return await call_next(request)
-    session = request.cookies.get("session")
-    if session == "authenticated":
-        return await call_next(request)
-    return RedirectResponse(url="/login", status_code=303)
+
+    # Access control wall for protected pages:
+    #   - Admin (session="authenticated" in this single-admin app) → always through
+    #   - Future multi-user: check sub.get('subscription_status') == 'active'
+    #     or is_beta_tester field before calling call_next
+    return await call_next(request)
 
 @app.get("/students", response_class=HTMLResponse)
 def students_page():
@@ -719,123 +835,220 @@ def send_test_sms(phone: str = Form(...)):
         return HTMLResponse(f"<h2>❌ Error: {str(e)}</h2><a href='/dashboard'>Back</a>")
 
 
-# ─── Stripe Subscription ──────────────────────────────────────────────────────
-
-@app.get("/checkout", response_class=HTMLResponse)
-def checkout_page(request: Request):
-    sub = _get_subscription()
-    if sub.get('status') == 'active':
-        return RedirectResponse(url="/settings/billing", status_code=303)
-    configured = _STRIPE_READY and bool(STRIPE_PRICE_MONTHLY)
-    btn = (
-        '<form method="post" action="/create-checkout-session">'
-        '<button type="submit" style="background:#635bff;color:#fff;border:none;'
-        'padding:16px 40px;border-radius:8px;font-size:18px;font-weight:700;cursor:pointer;">'
-        'Subscribe — $15/month</button></form>'
-    ) if configured else (
-        '<p style="color:#e53e3e;">Stripe is not yet configured. '
-        'Set STRIPE_SECRET_KEY and STRIPE_PRICE_MONTHLY environment variables.</p>'
-    )
-    return HTMLResponse(f"""<!DOCTYPE html>
-<html>
-<head><title>Subscribe</title><link rel="stylesheet" href="/static/style.css"></head>
-<body>
-  <div class="container" style="max-width:520px;">
-    <div class="card" style="text-align:center;">
-      <div style="font-size:48px;">🎵</div>
-      <h1>Studio App</h1>
-      <p style="color:#555;margin-bottom:8px;">Full access to your music studio management platform.</p>
-      <p style="font-size:32px;font-weight:700;color:#635bff;margin:16px 0;">$15<span style="font-size:16px;color:#888;">/month</span></p>
-      <ul style="text-align:left;display:inline-block;color:#444;margin:0 0 24px;padding-left:20px;">
-        <li>Student profiles &amp; scheduling</li>
-        <li>Attendance &amp; payment tracking</li>
-        <li>Google Calendar integration</li>
-        <li>Invoices &amp; revenue reports</li>
-      </ul>
-      <br>{btn}
-      <p style="margin-top:20px;"><a href="/dashboard" style="color:#888;">← Back to Dashboard</a></p>
-    </div>
-  </div>
-</body>
-</html>""")
-
+# ─── Stripe Billing ───────────────────────────────────────────────────────────
 
 @app.post("/create-checkout-session")
 async def create_checkout_session(request: Request):
-    if not _STRIPE_READY:
-        return RedirectResponse(url="/settings/billing?error=stripe_not_configured", status_code=303)
-    if not STRIPE_PRICE_MONTHLY:
-        return RedirectResponse(url="/settings/billing?error=missing_price_id", status_code=303)
-
+    if not _STRIPE_READY or not STRIPE_PRICE_MONTHLY:
+        return RedirectResponse(url="/billing?error=stripe_not_configured", status_code=303)
+    sub  = _sub_get()
     base = str(request.base_url).rstrip('/')
-    sub  = _get_subscription()
-
     try:
         kwargs: dict = {
-            "payment_method_types": ["card"],
-            "line_items": [{"price": STRIPE_PRICE_MONTHLY, "quantity": 1}],
-            "mode": "subscription",
-            "success_url": f"{base}/subscription/success?session_id={{CHECKOUT_SESSION_ID}}",
-            "cancel_url":  f"{base}/subscription/cancel",
+            "mode":        "subscription",
+            "line_items":  [{"price": STRIPE_PRICE_MONTHLY, "quantity": 1}],
+            "success_url": f"{base}/billing?success=1&session_id={{CHECKOUT_SESSION_ID}}",
+            "cancel_url":  f"{base}/billing?checkout_cancelled=1",
+            "metadata":    {"user_key": "admin"},
         }
-        customer_id = sub.get('customer_id', '')
+        customer_id = sub.get('stripe_customer_id', '')
         if customer_id:
             kwargs["customer"] = customer_id
-
         session = _stripe.checkout.Session.create(**kwargs)
         return RedirectResponse(url=session.url, status_code=303)
     except Exception as exc:
-        return RedirectResponse(url=f"/settings/billing?error={str(exc)[:120]}", status_code=303)
+        return RedirectResponse(url=f"/billing?error={str(exc)[:200]}", status_code=303)
 
 
-@app.get("/subscription/success", response_class=HTMLResponse)
-async def subscription_success(session_id: str = ""):
-    if session_id and _STRIPE_READY:
-        try:
-            checkout = _stripe.checkout.Session.retrieve(session_id)
-            _save_subscription({
-                'status':          'active',
-                'customer_id':     checkout.get('customer', ''),
-                'subscription_id': checkout.get('subscription', ''),
-            })
-        except Exception:
-            _save_subscription({**_get_subscription(), 'status': 'active'})
+@app.get("/billing", response_class=HTMLResponse)
+def billing_page(success: str = "", checkout_cancelled: str = "",
+                 msg: str = "", error: str = ""):
+    sub    = _sub_get()
+    status = sub.get('subscription_status', 'none')
+    data   = _fetch_stripe_data(sub)
+
+    # ── Notice banner ──
+    notice = ""
+    if success:
+        notice = ('<div style="background:#f0fdf4;border:1px solid #86efac;color:#166534;'
+                  'padding:14px 16px;border-radius:8px;margin-bottom:20px;font-weight:500;">'
+                  '✅ Subscription activated! Welcome to Studio Console.</div>')
+    elif checkout_cancelled:
+        notice = ('<div style="background:#fefce8;border:1px solid #fde047;color:#854d0e;'
+                  'padding:14px 16px;border-radius:8px;margin-bottom:20px;">'
+                  'Checkout was cancelled — no charge was made.</div>')
+    elif msg == "cancel_scheduled":
+        cancel_date = data.get('next_billing_date') or 'the end of your billing period'
+        notice = (f'<div style="background:#fff7ed;border:1px solid #fdba74;color:#9a3412;'
+                  f'padding:14px 16px;border-radius:8px;margin-bottom:20px;">'
+                  f'Your subscription will cancel on {cancel_date}. You keep access until then.</div>')
+    elif msg == "portal_error":
+        notice = ('<div style="background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;'
+                  'padding:14px 16px;border-radius:8px;margin-bottom:20px;">'
+                  '⚠️ Could not open Stripe portal — make sure it\'s enabled in your '
+                  '<a href="https://dashboard.stripe.com/settings/billing/portal" target="_blank">'
+                  'Stripe Dashboard</a>.</div>')
+    if error:
+        notice += (f'<div style="background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;'
+                   f'padding:14px 16px;border-radius:8px;margin-bottom:20px;">Error: {error}</div>')
+
+    # ── Status badge ──
+    badge_map = {
+        'active':     ('#16a34a', '✓ Active'),
+        'cancelled':  ('#dc2626', 'Cancelled'),
+        'incomplete': ('#d97706', 'Incomplete'),
+        'past_due':   ('#dc2626', 'Past Due'),
+        'none':       ('#6b7280', 'No Subscription'),
+    }
+    bc, bl = badge_map.get(status, ('#6b7280', status.title()))
+
+    # ── Plan card meta ──
+    pm = data['payment_method']
+    pm_html = (f'<div style="color:#64748b;font-size:14px;margin-top:4px;">'
+               f'{pm["brand"]} ···· {pm["last4"]} &nbsp;exp {pm["exp"]}</div>') if pm else ''
+
+    nd = data['next_billing_date']
+    if nd:
+        lbl = 'Cancels on' if data['cancel_at_period_end'] else 'Next billing'
+        nd_html = f'<div style="color:#64748b;font-size:14px;margin-top:4px;">{lbl}: {nd}</div>'
     else:
-        _save_subscription({**_get_subscription(), 'status': 'active'})
+        nd_html = ''
 
-    return HTMLResponse("""<!DOCTYPE html>
+    cancel_warn = (
+        f'<div style="background:#fff7ed;border:1px solid #fdba74;color:#9a3412;'
+        f'padding:10px 14px;border-radius:8px;margin-top:14px;font-size:14px;">'
+        f'Scheduled to cancel on {nd or "end of billing period"}.</div>'
+    ) if data['cancel_at_period_end'] else ''
+
+    configured = _STRIPE_READY and bool(STRIPE_PRICE_MONTHLY)
+    if status == 'active':
+        cancel_btn = '' if data['cancel_at_period_end'] else (
+            '<form method="post" action="/billing/cancel" style="display:inline;"'
+            ' onsubmit="return confirm(\'Schedule cancellation at end of billing period?\')">'
+            '<button type="submit" style="background:#fee2e2;color:#991b1b;border:none;'
+            'padding:12px 24px;border-radius:12px;font-weight:600;cursor:pointer;">'
+            'Cancel Plan</button></form>')
+        action = f"""
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:20px;">
+          <form method="post" action="/billing/portal" style="display:inline;">
+            <button type="submit" class="btn" style="margin:0;">Manage Billing</button>
+          </form>
+          {cancel_btn}
+        </div>"""
+    elif configured:
+        action = """
+        <div style="margin-top:20px;">
+          <form method="post" action="/create-checkout-session">
+            <button type="submit" class="btn"
+              style="font-size:16px;padding:14px 32px;margin:0;">
+              Subscribe — $15/month</button>
+          </form>
+        </div>"""
+    else:
+        action = ('<p style="color:#94a3b8;margin-top:16px;">'
+                  'Stripe is not yet configured. Set <code>STRIPE_SECRET_KEY</code> '
+                  'and <code>STRIPE_PRICE_MONTHLY</code>.</p>')
+
+    # ── Billing history ──
+    if data['invoices']:
+        rows_html = ""
+        for inv in data['invoices']:
+            sc = '#16a34a' if inv['status'] == 'Paid' else '#d97706'
+            links = ""
+            if inv['url']:
+                links += f'<a href="{inv["url"]}" target="_blank" style="color:#667eea;margin-right:8px;">View</a>'
+            if inv['pdf']:
+                links += f'<a href="{inv["pdf"]}" target="_blank" style="color:#667eea;">PDF</a>'
+            rows_html += f"""<tr>
+              <td>{inv['date']}</td>
+              <td style="font-weight:600;">{inv['amount']}</td>
+              <td><span style="background:{sc}22;color:{sc};padding:2px 10px;
+                border-radius:20px;font-size:13px;">{inv['status']}</span></td>
+              <td>{links}</td></tr>"""
+        history_html = f"""
+        <div class="card">
+          <h2 style="margin-top:0;">Billing History</h2>
+          <table>
+            <thead><tr><th>Date</th><th>Amount</th><th>Status</th><th>Receipt</th></tr></thead>
+            <tbody>{rows_html}</tbody>
+          </table>
+        </div>"""
+    else:
+        history_html = '<div class="card" style="color:#94a3b8;">No billing history yet.</div>'
+
+    return HTMLResponse(f"""<!DOCTYPE html>
 <html>
-<head><title>Subscribed!</title><link rel="stylesheet" href="/static/style.css"></head>
+<head>
+  <title>Billing &amp; Subscription</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
 <body>
-  <div class="container" style="max-width:480px;">
-    <div class="card" style="text-align:center;">
-      <div style="font-size:64px;">🎉</div>
-      <h1 style="color:#22c55e;">You're subscribed!</h1>
-      <p>Your Studio App subscription is now active.</p>
-      <a href="/dashboard" class="btn">Go to Dashboard</a>
+  <div class="container">
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;
+                  flex-wrap:wrap;gap:12px;margin-bottom:8px;">
+        <h1 style="margin:0;">💳 Billing &amp; Subscription</h1>
+        <a href="/dashboard" style="color:#667eea;font-size:14px;">← Dashboard</a>
+      </div>
+      <p style="color:#64748b;margin:0 0 24px;">Studio Console Monthly</p>
+      {notice}
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;
+                  padding:20px;margin-bottom:8px;">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;
+                    gap:12px;flex-wrap:wrap;">
+          <div>
+            <div style="font-size:18px;font-weight:700;color:#1e293b;">
+              Studio Console Monthly</div>
+            <div style="color:#64748b;font-size:15px;margin-top:2px;">$15 / month</div>
+            {pm_html}
+            {nd_html}
+          </div>
+          <span style="background:{bc}22;color:{bc};border:1px solid {bc}44;
+            padding:5px 14px;border-radius:20px;font-size:13px;font-weight:700;
+            white-space:nowrap;">{bl}</span>
+        </div>
+        {cancel_warn}
+        {action}
+      </div>
     </div>
+    {history_html}
   </div>
 </body>
 </html>""")
 
 
-@app.get("/subscription/cancel", response_class=HTMLResponse)
-def subscription_cancel():
-    return HTMLResponse("""<!DOCTYPE html>
-<html>
-<head><title>Cancelled</title><link rel="stylesheet" href="/static/style.css"></head>
-<body>
-  <div class="container" style="max-width:480px;">
-    <div class="card" style="text-align:center;">
-      <div style="font-size:64px;">↩️</div>
-      <h2>Checkout cancelled</h2>
-      <p>No charge was made. You can subscribe any time.</p>
-      <a href="/checkout" class="btn">Try again</a>
-      <a href="/dashboard" class="btn" style="background:#888;">Dashboard</a>
-    </div>
-  </div>
-</body>
-</html>""")
+@app.post("/billing/portal")
+async def billing_portal(request: Request):
+    sub         = _sub_get()
+    customer_id = sub.get('stripe_customer_id', '')
+    if not _STRIPE_READY or not customer_id:
+        return RedirectResponse(url="/billing?msg=portal_error", status_code=303)
+    base = str(request.base_url).rstrip('/')
+    try:
+        portal = _stripe.billing_portal.Session.create(
+            customer=customer_id,
+            return_url=f"{base}/billing",
+        )
+        return RedirectResponse(url=portal.url, status_code=303)
+    except Exception:
+        return RedirectResponse(url="/billing?msg=portal_error", status_code=303)
+
+
+@app.post("/billing/cancel")
+async def billing_cancel():
+    sub    = _sub_get()
+    sub_id = sub.get('stripe_subscription_id', '')
+    if _STRIPE_READY and sub_id:
+        try:
+            updated = _stripe.Subscription.modify(sub_id, cancel_at_period_end=True)
+            sub['cancel_at_period_end'] = 'true'
+            period_end = updated.get('current_period_end', '')
+            if period_end:
+                sub['current_period_end'] = str(period_end)
+            _sub_save(sub)
+        except Exception:
+            pass
+    return RedirectResponse(url="/billing?msg=cancel_scheduled", status_code=303)
 
 
 @app.post("/webhook/stripe")
@@ -851,108 +1064,40 @@ async def stripe_webhook(request: Request):
     except Exception:
         return Response(status_code=400)
 
+    event_id = event.get("id", "")
+    if _event_processed(event_id):
+        return {"status": "already_processed"}
+    _mark_event(event_id)
+
     etype = event.get("type", "")
     obj   = event["data"]["object"]
 
     if etype == "checkout.session.completed":
-        _save_subscription({
-            'status':          'active',
-            'customer_id':     obj.get('customer', ''),
-            'subscription_id': obj.get('subscription', ''),
-        })
+        sub = _sub_get()
+        sub['stripe_customer_id']     = obj.get('customer', '')
+        sub['stripe_subscription_id'] = obj.get('subscription', '')
+        sub['subscription_status']    = 'active'
+        sub['cancel_at_period_end']   = 'false'
+        _sub_save(sub)
 
     elif etype == "invoice.paid":
-        sub = _get_subscription()
-        sub['status'] = 'active'
-        _save_subscription(sub)
+        sub = _sub_get()
+        sub['subscription_status'] = 'active'
+        _sub_save(sub)
+
+    elif etype == "customer.subscription.updated":
+        sub = _sub_get()
+        sub['subscription_status']  = obj.get('status', 'active')
+        sub['cancel_at_period_end'] = str(obj.get('cancel_at_period_end', False)).lower()
+        period_end = obj.get('current_period_end', '')
+        if period_end:
+            sub['current_period_end'] = str(period_end)
+        _sub_save(sub)
 
     elif etype == "customer.subscription.deleted":
-        sub = _get_subscription()
-        sub['status'] = 'cancelled'
-        _save_subscription(sub)
-
-    elif etype in ("customer.subscription.updated",):
-        stripe_status = obj.get("status", "")
-        sub = _get_subscription()
-        sub['status'] = 'active' if stripe_status == 'active' else stripe_status
-        _save_subscription(sub)
+        sub = _sub_get()
+        sub['subscription_status']  = 'cancelled'
+        sub['cancel_at_period_end'] = 'false'
+        _sub_save(sub)
 
     return {"status": "ok"}
-
-
-@app.get("/settings/billing", response_class=HTMLResponse)
-def settings_billing(msg: str = "", error: str = ""):
-    sub        = _get_subscription()
-    status     = sub.get('status', 'none')
-    configured = _STRIPE_READY and bool(STRIPE_PRICE_MONTHLY)
-
-    badge_map = {
-        'active':    ('#16a34a', 'Active'),
-        'cancelled': ('#dc2626', 'Cancelled'),
-        'none':      ('#6b7280', 'No subscription'),
-    }
-    badge_color, badge_label = badge_map.get(status, ('#6b7280', status.title()))
-
-    notice = ""
-    if msg == "cancelled":
-        notice = '<div style="background:#fef2f2;color:#991b1b;padding:12px;border-radius:8px;margin-bottom:16px;">Subscription cancelled. Access continues until the end of the billing period.</div>'
-    if error:
-        notice += f'<div style="background:#fef2f2;color:#991b1b;padding:12px;border-radius:8px;margin-bottom:16px;">Error: {error}</div>'
-    if msg == "ok":
-        notice = '<div style="background:#f0fdf4;color:#166534;padding:12px;border-radius:8px;margin-bottom:16px;">Changes saved.</div>'
-
-    if status == 'active':
-        action = """
-        <p style="color:#16a34a;font-weight:600;">✅ Your subscription is active.</p>
-        <form method="post" action="/subscription/manage-cancel"
-              onsubmit="return confirm('Cancel your subscription?')">
-          <button type="submit" style="background:#fee2e2;color:#991b1b;border:none;
-            padding:10px 20px;border-radius:8px;cursor:pointer;">Cancel Subscription</button>
-        </form>"""
-    elif configured:
-        action = """
-        <p style="color:#555;margin-bottom:16px;">Subscribe to unlock full access.</p>
-        <form method="post" action="/create-checkout-session">
-          <button type="submit" style="background:#635bff;color:#fff;border:none;
-            padding:14px 32px;border-radius:8px;font-size:16px;font-weight:700;cursor:pointer;">
-            Subscribe — $15/month</button>
-        </form>"""
-    else:
-        action = '<p style="color:#888;">Stripe payments are not yet configured. Set <code>STRIPE_SECRET_KEY</code> and <code>STRIPE_PRICE_MONTHLY</code> in your environment.</p>'
-
-    return HTMLResponse(f"""<!DOCTYPE html>
-<html>
-<head><title>Billing</title><link rel="stylesheet" href="/static/style.css"></head>
-<body>
-  <div class="container" style="max-width:520px;">
-    <div class="card">
-      <h1>💳 Billing &amp; Subscription</h1>
-      {notice}
-      <div style="background:#f8fafc;border-radius:8px;padding:16px;margin-bottom:20px;
-                  display:flex;align-items:center;justify-content:space-between;">
-        <div>
-          <div style="font-weight:600;">Studio App — Monthly</div>
-          <div style="color:#888;font-size:14px;">$15 / month</div>
-        </div>
-        <span style="background:{badge_color};color:#fff;padding:4px 12px;
-              border-radius:20px;font-size:13px;font-weight:600;">{badge_label}</span>
-      </div>
-      {action}
-      <p style="margin-top:24px;"><a href="/dashboard" style="color:#888;">← Back to Dashboard</a></p>
-    </div>
-  </div>
-</body>
-</html>""")
-
-
-@app.post("/subscription/manage-cancel")
-async def subscription_manage_cancel():
-    sub = _get_subscription()
-    if _STRIPE_READY and sub.get('subscription_id'):
-        try:
-            _stripe.Subscription.modify(sub['subscription_id'], cancel_at_period_end=True)
-        except Exception:
-            pass
-    sub['status'] = 'cancelled'
-    _save_subscription(sub)
-    return RedirectResponse(url="/settings/billing?msg=cancelled", status_code=303)
