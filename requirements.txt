@@ -7,3 +7,4 @@ google-api-python-client==2.108.0
 pytz==2023.3
 python-multipart==0.0.6
 twilio==8.10.0
+stripe==7.5.0
