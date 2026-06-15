@@ -170,8 +170,9 @@ if not os.path.exists(PASSWORD_FILE):
 
 # Data files
 PROFILES_FILE = "student_profiles.csv"
-PRICING_FILE = "pricing_tiers.csv"
-DEFAULT_RATE = 50.00
+PRICING_FILE  = "pricing_tiers.csv"
+LEDGER_FILE   = "ledger.csv"
+DEFAULT_RATE  = 50.00
 
 def get_all_profiles():
     profiles = {}
