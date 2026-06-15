@@ -247,7 +247,11 @@ def page(title: str, content: str, active: str = "dashboard") -> str:
         ("rates",     "/rates",      "💰", "Rates"),
         ("payments",  "/payments",   "💳", "Payments"),
         ("schedule",  "/schedule",   "📅", "Schedule"),
-        ("billing",   "/billing",    "🧾", "Billing"),
+        ("invoices",  "/invoices",   "🧾", "Invoices"),
+        ("analytics", "/analytics",  "📈", "Analytics"),
+        ("settings",  "/settings",   "⚙️",  "Settings"),
+        ("admin",     "/admin",      "🔐", "Admin"),
+        ("billing",   "/billing",    "💳", "Billing"),
     ]
     nav_html = "".join(
         f'<a href="{href}" class="nav-link{" active" if k == active else ""}">'
@@ -325,16 +329,19 @@ def get_all_profiles():
                         "rate": float(row.get("Rate", DEFAULT_RATE)),
                         "target_minutes": int(row.get("TargetMinutes", 60)),
                         "credits": int(row.get("Credits", 0)),
-                        "description": row.get("Description", "")
+                        "description": row.get("Description", ""),
+                        "prepaid": float(row.get("Prepaid", 0)),
                     }
     return profiles
 
 def save_all_profiles(profiles_map):
     with open(PROFILES_FILE, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(["Name", "TierName", "Rate", "TargetMinutes", "Credits", "Description"])
+        writer.writerow(["Name", "TierName", "Rate", "TargetMinutes", "Credits", "Description", "Prepaid"])
         for name, data in profiles_map.items():
-            writer.writerow([name, data['tier_name'], data['rate'], data['target_minutes'], data['credits'], data['description']])
+            writer.writerow([name, data.get('tier_name', ''), data.get('rate', DEFAULT_RATE),
+                             data.get('target_minutes', 60), data.get('credits', 0),
+                             data.get('description', ''), data.get('prepaid', 0)])
 
 def get_pricing_tiers():
     tiers = {}
@@ -356,6 +363,223 @@ def save_pricing_tiers(tiers_map):
         writer.writerow(["TierName", "HourlyRate", "TargetMinutes"])
         for name, data in tiers_map.items():
             writer.writerow([name, data['rate'], data['minutes']])
+
+
+# ── Status constants ──────────────────────────────────────────────────────────
+ATTENDED_STATUSES    = frozenset(['Confirmed', 'Attended', 'Completed', 'Completed (Half Rate)'])
+MISSED_STATUSES      = frozenset(['Missed', 'No-Show', 'No Show'])
+ZERO_CHARGE_STATUSES = frozenset(['Cancelled', 'Rescheduled', 'Completed (Make-up)'])
+HALF_CHARGE_STATUSES = frozenset(['Completed (Half Rate)'])
+
+LEDGER_FIELDS = ['Date', 'Student', 'Status', 'AmountCharged', 'Notes']
+
+def _ledger_reader(f):
+    """DictReader that works whether or not the CSV has a header row."""
+    first = f.readline()
+    f.seek(0)
+    if first.strip() == ','.join(LEDGER_FIELDS):
+        return csv.DictReader(f)
+    return csv.DictReader(f, fieldnames=LEDGER_FIELDS)
+
+def _safe_float(value):
+    try:
+        return float(value or 0)
+    except (ValueError, TypeError):
+        return 0.0
+
+
+# ── Calendar settings ─────────────────────────────────────────────────────────
+SETTINGS_FILE = "calendar_settings.json"
+
+def load_calendar_settings():
+    defaults = {
+        "lesson_keywords": ["lesson", "private", "student", "class", "music",
+                            "piano", "guitar", "violin", "drums", "voice"],
+        "show_all": True,
+    }
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, 'r') as f:
+                defaults.update(json.load(f))
+        except Exception:
+            pass
+    return defaults
+
+def save_calendar_settings(settings):
+    with open(SETTINGS_FILE, 'w') as f:
+        json.dump(settings, f, indent=2)
+
+
+# ── Invoice helpers ───────────────────────────────────────────────────────────
+INVOICES_FILE   = "invoices.csv"
+INVOICE_HEADERS = ["ID", "Student", "Month", "Year", "LessonsCount",
+                   "TotalAmount", "PaymentsApplied", "BalanceDue",
+                   "Status", "CreatedDate", "PaidDate"]
+MONTH_NAMES = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+               'July', 'August', 'September', 'October', 'November', 'December']
+MONTH_SHORT  = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+if not os.path.exists(INVOICES_FILE):
+    with open(INVOICES_FILE, 'w', newline='') as _f:
+        csv.DictWriter(_f, fieldnames=INVOICE_HEADERS).writeheader()
+
+def get_all_invoices():
+    rows = []
+    if os.path.exists(INVOICES_FILE):
+        with open(INVOICES_FILE, 'r') as f:
+            for row in csv.DictReader(f):
+                rows.append(dict(row))
+    return rows
+
+def save_all_invoices(invoices):
+    with open(INVOICES_FILE, 'w', newline='') as f:
+        w = csv.DictWriter(f, fieldnames=INVOICE_HEADERS)
+        w.writeheader()
+        for inv in invoices:
+            w.writerow({k: inv.get(k, '') for k in INVOICE_HEADERS})
+
+def generate_invoices_for_month(year: int, month: int) -> int:
+    profiles  = get_all_profiles()
+    invoices  = get_all_invoices()
+    existing  = {(i['Student'], i['Year'], i['Month']) for i in invoices}
+    ledger_by = {}
+    if os.path.exists(LEDGER_FILE):
+        with open(LEDGER_FILE, 'r') as f:
+            for row in _ledger_reader(f):
+                try:
+                    d = datetime.strptime(row.get('Date', ''), '%Y-%m-%d')
+                except ValueError:
+                    continue
+                if d.year != year or d.month != month:
+                    continue
+                stu = row.get('Student', '').strip()
+                amt = _safe_float(row.get('AmountCharged', 0))
+                if stu not in ledger_by:
+                    ledger_by[stu] = {'lessons': 0, 'charged': 0.0}
+                if row.get('Status', '') in ATTENDED_STATUSES:
+                    ledger_by[stu]['lessons'] += 1
+                    ledger_by[stu]['charged']  += amt
+    next_id = max((int(i.get('ID', 0)) for i in invoices), default=0) + 1
+    added = 0
+    for stu, data in ledger_by.items():
+        if data['lessons'] == 0:
+            continue
+        if (stu, str(year), str(month)) in existing:
+            continue
+        rate        = profiles.get(stu, {}).get('rate', DEFAULT_RATE)
+        total       = round(data['lessons'] * rate, 2)
+        applied     = round(data['charged'], 2)
+        balance     = round(max(total - applied, 0), 2)
+        invoices.append({
+            'ID': str(next_id), 'Student': stu, 'Month': str(month), 'Year': str(year),
+            'LessonsCount': str(data['lessons']), 'TotalAmount': f"{total:.2f}",
+            'PaymentsApplied': f"{applied:.2f}", 'BalanceDue': f"{balance:.2f}",
+            'Status': 'Paid' if balance <= 0 else 'Unpaid',
+            'CreatedDate': datetime.now().strftime('%Y-%m-%d'), 'PaidDate': '',
+        })
+        next_id += 1
+        added   += 1
+    save_all_invoices(invoices)
+    return added
+
+
+# ── Analytics helpers ─────────────────────────────────────────────────────────
+def calculate_total_revenue():
+    total = 0.0
+    if os.path.exists(LEDGER_FILE):
+        with open(LEDGER_FILE, 'r') as f:
+            for row in _ledger_reader(f):
+                total += _safe_float(row.get('AmountCharged', 0))
+    return total
+
+def compute_analytics():
+    from collections import defaultdict
+    now = datetime.now()
+
+    def _months(n):
+        result = []
+        for i in range(n - 1, -1, -1):
+            m, y = now.month - i, now.year
+            while m <= 0:
+                m += 12; y -= 1
+            result.append((y, m))
+        return result
+
+    profiles    = get_all_profiles()
+    ledger_rows = []
+    if os.path.exists(LEDGER_FILE):
+        with open(LEDGER_FILE, 'r') as f:
+            for row in _ledger_reader(f):
+                try:
+                    row['_date'] = datetime.strptime(row.get('Date', ''), '%Y-%m-%d')
+                except Exception:
+                    row['_date'] = None
+                ledger_rows.append(row)
+
+    six_m   = _months(6)
+    three_m = _months(3)
+
+    month_rev = defaultdict(float)
+    for row in ledger_rows:
+        if row['_date']:
+            month_rev[(row['_date'].year, row['_date'].month)] += _safe_float(row.get('AmountCharged', 0))
+
+    monthly_revenue = [
+        {'label': datetime(y, m, 1).strftime('%b %Y'), 'rev': round(month_rev.get((y, m), 0), 2)}
+        for y, m in six_m
+    ]
+
+    student_rev = defaultdict(float)
+    for row in ledger_rows:
+        amt = _safe_float(row.get('AmountCharged', 0))
+        if amt > 0:
+            student_rev[row.get('Student', 'Unknown')] += amt
+    top5 = sorted(student_rev.items(), key=lambda x: x[1], reverse=True)[:5]
+
+    att = defaultdict(int)
+    for row in ledger_rows:
+        s = row.get('Status', '')
+        if s in ATTENDED_STATUSES:    att['confirmed'] += 1
+        elif s in MISSED_STATUSES:    att['missed']    += 1
+        elif s in ZERO_CHARGE_STATUSES: att['cancelled'] += 1
+    att_total = sum(att.values()) or 1
+
+    stu_att = defaultdict(lambda: defaultdict(int))
+    for row in ledger_rows:
+        stu = row.get('Student', '')
+        s   = row.get('Status', '')
+        if s in ATTENDED_STATUSES:      stu_att[stu]['c'] += 1
+        elif s in MISSED_STATUSES:      stu_att[stu]['m'] += 1
+        elif s in ZERO_CHARGE_STATUSES: stu_att[stu]['x'] += 1
+
+    reliability = []
+    for stu, counts in stu_att.items():
+        total = counts['c'] + counts['m']
+        rate  = round(counts['c'] / total * 100, 1) if total > 0 else 100.0
+        reliability.append({'name': stu, 'rate': rate,
+                             'confirmed': counts['c'], 'missed': counts['m']})
+    reliability.sort(key=lambda x: x['rate'], reverse=True)
+
+    last3_rev  = sum(month_rev.get(k, 0) for k in three_m)
+    projected  = round(last3_rev / 3, 2)
+    total_rev  = sum(month_rev.values())
+    total_pre  = sum(d.get('prepaid', 0) for d in profiles.values())
+
+    return {
+        'monthly_revenue': monthly_revenue,
+        'total_revenue': round(total_rev, 2),
+        'revenue_by_student': [{'name': n, 'rev': round(r, 2)} for n, r in top5],
+        'att': dict(att), 'att_total': att_total,
+        'confirmed_pct': round(att['confirmed'] / att_total * 100, 1),
+        'missed_pct':    round(att['missed']    / att_total * 100, 1),
+        'cancelled_pct': round(att['cancelled'] / att_total * 100, 1),
+        'reliability': reliability,
+        'total_students': len(profiles),
+        'projected': projected,
+        'total_prepaid': round(total_pre, 2),
+    }
+
 
 # Dashboard with Calendar
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -1238,4 +1462,342 @@ async def stripe_webhook(request: Request):
         _sub_save(sub)
 
     return {"status": "ok"}
+
+
+# ─── Analytics ────────────────────────────────────────────────────────────────
+
+@app.get("/analytics", response_class=HTMLResponse)
+def analytics_page():
+    try:
+        data = compute_analytics()
+    except Exception as e:
+        return HTMLResponse(page("Analytics", f'<div class="card"><p style="color:var(--danger);">Error loading analytics: {e}</p></div>', "analytics"))
+
+    chart_json = json.dumps({
+        'monthlyLabels': [m['label'] for m in data['monthly_revenue']],
+        'monthlyValues': [m['rev']   for m in data['monthly_revenue']],
+        'studentLabels': [s['name']  for s in data['revenue_by_student']],
+        'studentValues': [s['rev']   for s in data['revenue_by_student']],
+        'attValues': [data['att'].get('confirmed', 0),
+                      data['att'].get('missed', 0),
+                      data['att'].get('cancelled', 0)],
+    })
+
+    reliability_rows = ""
+    for r in data['reliability']:
+        bar = min(int(r['rate']), 100)
+        reliability_rows += f"""<tr>
+  <td><strong>{r['name']}</strong></td>
+  <td><div style="display:flex;align-items:center;gap:8px;">
+    <div style="width:{bar}px;height:8px;border-radius:4px;background:linear-gradient(90deg,var(--primary),var(--secondary));min-width:4px;flex-shrink:0;"></div>
+    <span>{r['rate']}%</span></div></td>
+  <td style="color:var(--success);font-weight:700;">{r['confirmed']}</td>
+  <td style="color:var(--danger);font-weight:700;">{r['missed']}</td>
+</tr>"""
+    if not reliability_rows:
+        reliability_rows = '<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:20px;">No attendance data yet</td></tr>'
+
+    rev_by_student = "".join(
+        f'<tr><td><strong>{s["name"]}</strong></td><td style="color:var(--success);font-weight:700;">${s["rev"]:.2f}</td></tr>'
+        for s in data['revenue_by_student']
+    ) or '<tr><td colspan="2" style="text-align:center;color:var(--muted);padding:16px;">No data yet</td></tr>'
+
+    content = f"""
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+.kpi-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:22px;}}
+.kpi-card{{background:#fff;border:1px solid var(--border);border-radius:13px;padding:18px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.04);}}
+.kpi-value{{font-size:28px;font-weight:800;background:linear-gradient(135deg,var(--primary),var(--secondary));-webkit-background-clip:text;-webkit-text-fill-color:transparent;line-height:1.2;}}
+.kpi-label{{color:var(--muted);font-size:11px;font-weight:700;margin-top:6px;text-transform:uppercase;letter-spacing:.7px;}}
+.chart-card{{background:#fff;border-radius:13px;padding:20px;border:1px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,.04);margin-bottom:16px;}}
+.chart-card h3{{font-size:13px;font-weight:700;margin:0 0 14px;}}
+</style>
+
+<div class="kpi-grid">
+  <div class="kpi-card"><div class="kpi-value">${data['total_revenue']:.2f}</div><div class="kpi-label">Total Revenue</div></div>
+  <div class="kpi-card"><div class="kpi-value">{data['total_students']}</div><div class="kpi-label">Active Students</div></div>
+  <div class="kpi-card"><div class="kpi-value">{data['confirmed_pct']}%</div><div class="kpi-label">Attendance Rate</div></div>
+  <div class="kpi-card"><div class="kpi-value">${data['projected']:.2f}</div><div class="kpi-label">Projected / Month</div></div>
+  <div class="kpi-card"><div class="kpi-value">${data['total_prepaid']:.2f}</div><div class="kpi-label">Total Prepaid</div></div>
+</div>
+
+<div class="two-col">
+  <div class="chart-card"><h3>📊 Monthly Revenue — Last 6 Months</h3><canvas id="monthlyChart"></canvas></div>
+  <div class="chart-card"><h3>👥 Revenue by Student</h3>
+    <table><thead><tr><th>Student</th><th>Revenue</th></tr></thead><tbody>{rev_by_student}</tbody></table>
+  </div>
+</div>
+
+<div class="two-col">
+  <div class="chart-card"><h3>📅 Overall Attendance</h3>
+    <canvas id="attChart" style="max-height:220px;"></canvas>
+    <div style="display:flex;justify-content:center;gap:16px;margin-top:12px;font-size:12px;font-weight:600;">
+      <span style="color:var(--success);">✅ {data['confirmed_pct']}% Confirmed</span>
+      <span style="color:var(--danger);">❌ {data['missed_pct']}% Missed</span>
+      <span style="color:var(--warning);">🔄 {data['cancelled_pct']}% Cancelled</span>
+    </div>
+  </div>
+  <div class="chart-card"><h3>⭐ Student Reliability</h3>
+    <table>
+      <thead><tr><th>Student</th><th>Rate</th><th>✅</th><th>❌</th></tr></thead>
+      <tbody>{reliability_rows}</tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const D = {chart_json};
+Chart.defaults.font.family = "'Inter',-apple-system,sans-serif";
+new Chart(document.getElementById('monthlyChart'),{{type:'bar',data:{{labels:D.monthlyLabels,datasets:[{{label:'Revenue',data:D.monthlyValues,backgroundColor:'rgba(99,102,241,.75)',borderColor:'#6366f1',borderWidth:2,borderRadius:7,borderSkipped:false}}]}},options:{{responsive:true,plugins:{{legend:{{display:false}},tooltip:{{callbacks:{{label:ctx=>'$'+ctx.parsed.y.toFixed(2)}}}}}},scales:{{y:{{beginAtZero:true,ticks:{{callback:v=>'$'+v}}}}}}}}}});
+new Chart(document.getElementById('attChart'),{{type:'doughnut',data:{{labels:['Confirmed','Missed','Cancelled'],datasets:[{{data:D.attValues,backgroundColor:['rgba(16,185,129,.85)','rgba(239,68,68,.85)','rgba(245,158,11,.85)'],borderColor:['#10b981','#ef4444','#f59e0b'],borderWidth:2}}]}},options:{{responsive:true,cutout:'62%',plugins:{{legend:{{position:'bottom'}}}}}}}});
+</script>"""
+    return HTMLResponse(page("Analytics", content, "analytics"))
+
+
+# ─── Invoices ─────────────────────────────────────────────────────────────────
+
+@app.get("/invoices", response_class=HTMLResponse)
+def invoices_page():
+    invoices = sorted(get_all_invoices(),
+                      key=lambda x: (x.get('Year',''), x.get('Month','').zfill(2), x.get('Student','')),
+                      reverse=True)
+    unpaid = [i for i in invoices if i.get('Status') == 'Unpaid']
+    paid   = [i for i in invoices if i.get('Status') == 'Paid']
+    outstanding = sum(_safe_float(i.get('BalanceDue', 0)) for i in unpaid)
+
+    rows = ""
+    for inv in invoices:
+        m     = int(inv.get('Month', 1))
+        label = f"{MONTH_SHORT[m]} {inv.get('Year','')}"
+        st    = inv.get('Status', 'Unpaid')
+        badge = 'badge-success' if st == 'Paid' else 'badge-warning'
+        bal   = _safe_float(inv.get('BalanceDue', 0))
+        iid   = inv.get('ID', '')
+        rows += f"""<tr>
+  <td><a href="/invoices/{iid}" style="color:var(--primary);font-weight:600;">#INV-{iid.zfill(4)}</a></td>
+  <td><strong>{inv.get('Student','')}</strong></td>
+  <td>{label}</td>
+  <td>${_safe_float(inv.get('TotalAmount',0)):.2f}</td>
+  <td style="font-weight:700;color:{'var(--danger)' if bal > 0 else 'var(--success)'};">${bal:.2f}</td>
+  <td><span class="badge {badge}">{st}</span></td>
+  <td><a href="/invoices/{iid}" class="btn btn-outline btn-sm">View</a></td>
+</tr>"""
+    if not rows:
+        rows = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted);">No invoices yet — generate below.</td></tr>'
+
+    now  = datetime.now()
+    pm   = now.month - 1 if now.month > 1 else 12
+    py   = now.year   if now.month > 1 else now.year - 1
+    opts = "".join(f'<option value="{i}"{" selected" if i==pm else ""}>{MONTH_NAMES[i]}</option>' for i in range(1,13))
+
+    content = f"""
+<div class="stats-row">
+  <div class="stat-card"><div class="stat-icon" style="background:#e0e7ff;">🧾</div><div class="stat-val">{len(invoices)}</div><div class="stat-lbl">Total</div></div>
+  <div class="stat-card"><div class="stat-icon" style="background:#fee2e2;">⏳</div><div class="stat-val">{len(unpaid)}</div><div class="stat-lbl">Unpaid</div></div>
+  <div class="stat-card"><div class="stat-icon" style="background:#d1fae5;">✅</div><div class="stat-val">{len(paid)}</div><div class="stat-lbl">Paid</div></div>
+  <div class="stat-card"><div class="stat-icon" style="background:#fef3c7;">💰</div><div class="stat-val">${outstanding:.2f}</div><div class="stat-lbl">Outstanding</div></div>
+</div>
+<div class="card">
+  <div class="card-header"><h2 style="margin:0;">🧾 Invoices</h2></div>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Invoice</th><th>Student</th><th>Period</th><th>Total</th><th>Balance</th><th>Status</th><th></th></tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+  </div>
+</div>
+<div class="card" style="max-width:420px;">
+  <h2>⚡ Generate Invoices</h2>
+  <p style="color:var(--muted);font-size:13px;margin-bottom:16px;">Creates one invoice per student for all confirmed lessons in the selected month.</p>
+  <form action="/generate-invoices" method="post">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div class="form-group" style="margin:0;"><label class="form-label">Month</label><select name="month">{opts}</select></div>
+      <div class="form-group" style="margin:0;"><label class="form-label">Year</label><input type="number" name="year" value="{py}" min="2020" max="2035" required></div>
+    </div>
+    <button type="submit" class="btn" style="margin-top:14px;">⚡ Generate</button>
+  </form>
+</div>"""
+    return HTMLResponse(page("Invoices", content, "invoices"))
+
+
+@app.post("/generate-invoices")
+def generate_invoices_post(month: int = Form(...), year: int = Form(...)):
+    count  = generate_invoices_for_month(year, month)
+    period = f"{MONTH_NAMES[month]} {year}"
+    if count > 0:
+        msg = f'<div class="alert alert-success">✅ Generated {count} invoice(s) for {period}.</div>'
+    else:
+        msg = f'<div class="alert alert-warning">ℹ️ No new invoices for {period}. Already generated or no confirmed lessons.</div>'
+    return HTMLResponse(page("Generate Invoices", msg + '<a href="/invoices" class="btn">← View All Invoices</a>', "invoices"))
+
+
+@app.get("/invoices/{invoice_id}", response_class=HTMLResponse)
+def invoice_detail(invoice_id: str):
+    invoices = get_all_invoices()
+    inv = next((i for i in invoices if i.get('ID') == invoice_id), None)
+    if not inv:
+        return RedirectResponse(url="/invoices", status_code=303)
+
+    m       = int(inv.get('Month', 1))
+    total   = _safe_float(inv.get('TotalAmount', 0))
+    applied = _safe_float(inv.get('PaymentsApplied', 0))
+    balance = _safe_float(inv.get('BalanceDue', 0))
+    lessons = int(inv.get('LessonsCount', 0))
+    rate    = total / lessons if lessons > 0 else 0
+    status  = inv.get('Status', 'Unpaid')
+    badge   = '<span class="badge badge-success" style="font-size:14px;padding:5px 14px;">✅ Paid</span>' if status == 'Paid' else '<span class="badge badge-warning" style="font-size:14px;padding:5px 14px;">⏳ Unpaid</span>'
+    mark_btn = '' if status == 'Paid' else f'<form action="/mark-invoice-paid/{invoice_id}" method="post" style="display:inline;"><button type="submit" class="btn btn-success">✅ Mark as Paid</button></form>'
+
+    content = f"""
+<div class="card" style="max-width:580px;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
+    <div><h2 style="margin:0;">Invoice #INV-{invoice_id.zfill(4)}</h2>
+    <div style="color:var(--muted);font-size:13px;margin-top:3px;">Created {inv.get('CreatedDate','')}</div></div>
+    {badge}
+  </div>
+  <div style="background:var(--bg);border-radius:10px;padding:14px;margin-bottom:18px;">
+    <div style="display:grid;grid-template-columns:120px 1fr;gap:4px;font-size:13px;">
+      <span style="color:var(--muted);">Student</span><strong>{inv.get('Student','')}</strong>
+      <span style="color:var(--muted);">Period</span><strong>{MONTH_NAMES[m]} {inv.get('Year','')}</strong>
+      {'<span style="color:var(--muted);">Paid On</span><strong>' + inv.get('PaidDate','') + '</strong>' if status == 'Paid' and inv.get('PaidDate') else ''}
+    </div>
+  </div>
+  <table style="margin-bottom:18px;">
+    <thead><tr><th>Description</th><th style="text-align:right;">Amount</th></tr></thead>
+    <tbody>
+      <tr><td>{lessons} lesson{"s" if lessons != 1 else ""} × ${rate:.2f}/lesson</td><td style="text-align:right;font-weight:600;">${total:.2f}</td></tr>
+      <tr><td style="color:var(--success);">Payments Applied</td><td style="text-align:right;color:var(--success);font-weight:600;">−${applied:.2f}</td></tr>
+      <tr style="border-top:2px solid var(--border);"><td style="font-weight:700;padding:12px 13px;">Balance Due</td>
+        <td style="text-align:right;font-weight:800;font-size:18px;padding:12px 13px;color:{'var(--success)' if balance<=0 else 'var(--danger)'};">${balance:.2f}</td></tr>
+    </tbody>
+  </table>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">{mark_btn}<a href="/invoices" class="btn btn-outline">← All Invoices</a></div>
+</div>"""
+    return HTMLResponse(page(f"Invoice #INV-{invoice_id.zfill(4)}", content, "invoices"))
+
+
+@app.post("/mark-invoice-paid/{invoice_id}")
+def mark_invoice_paid(invoice_id: str):
+    invoices = get_all_invoices()
+    for inv in invoices:
+        if inv.get('ID') == invoice_id:
+            inv['Status']     = 'Paid'
+            inv['PaidDate']   = datetime.now().strftime('%Y-%m-%d')
+            inv['BalanceDue'] = '0.00'
+            break
+    save_all_invoices(invoices)
+    return RedirectResponse(url=f"/invoices/{invoice_id}", status_code=303)
+
+
+# ─── Settings ─────────────────────────────────────────────────────────────────
+
+@app.get("/settings", response_class=HTMLResponse)
+def settings_page():
+    s        = load_calendar_settings()
+    keywords = ", ".join(s.get("lesson_keywords", []))
+    checked  = "checked" if s.get("show_all", True) else ""
+    content  = f"""
+<div class="card" style="max-width:560px;">
+  <h2>⚙️ Calendar Settings</h2>
+  <form action="/settings" method="post">
+    <div class="form-group">
+      <label class="form-label">Lesson Keywords (comma separated)</label>
+      <textarea name="lesson_keywords" rows="3" style="width:100%;padding:9px 11px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;">{keywords}</textarea>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px;">Events matching these words appear on the dashboard as lessons.</div>
+    </div>
+    <div class="form-group" style="display:flex;align-items:center;gap:8px;">
+      <input type="checkbox" name="show_all" value="true" {checked} id="show_all" style="width:auto;">
+      <label for="show_all" style="font-size:13px;font-weight:500;margin:0;cursor:pointer;">Show unregistered lesson-like events on dashboard</label>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:6px;">
+      <button type="submit" class="btn">Save Settings</button>
+      <a href="/calendar-auth" class="btn btn-outline">🔗 Re-connect Calendar</a>
+    </div>
+  </form>
+</div>"""
+    return HTMLResponse(page("Settings", content, "settings"))
+
+
+@app.post("/settings")
+def save_settings_post(lesson_keywords: str = Form(""), show_all: str = Form("false")):
+    save_calendar_settings({
+        "lesson_keywords": [k.strip() for k in lesson_keywords.split(',') if k.strip()],
+        "show_all": show_all == "true",
+    })
+    return RedirectResponse(url="/settings", status_code=303)
+
+
+# ─── Admin ────────────────────────────────────────────────────────────────────
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page():
+    profiles   = get_all_profiles()
+    total_rev  = calculate_total_revenue()
+    total_pre  = sum(d.get('prepaid', 0) for d in profiles.values())
+    content = f"""
+<div class="stats-row">
+  <div class="stat-card"><div class="stat-icon" style="background:#ede9fe;">👥</div><div class="stat-val">{len(profiles)}</div><div class="stat-lbl">Students</div></div>
+  <div class="stat-card"><div class="stat-icon" style="background:#d1fae5;">📊</div><div class="stat-val">${total_rev:.2f}</div><div class="stat-lbl">Total Revenue</div></div>
+  <div class="stat-card"><div class="stat-icon" style="background:#e0e7ff;">💳</div><div class="stat-val">${total_pre:.2f}</div><div class="stat-lbl">Prepaid Balance</div></div>
+</div>
+<div class="two-col">
+  <div class="card">
+    <h2>📥 Data Backup</h2>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:18px;">Download a backup of all your studio data.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <a href="/api/backup" class="btn">📥 JSON Backup</a>
+      <a href="/api/backup/csv" class="btn btn-outline">📦 CSV Backup (ZIP)</a>
+    </div>
+  </div>
+  <div class="card">
+    <h2>🔧 Quick Links</h2>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <a href="/analytics" class="btn btn-outline" style="justify-content:flex-start;">📈 View Analytics</a>
+      <a href="/invoices"  class="btn btn-outline" style="justify-content:flex-start;">🧾 Manage Invoices</a>
+      <a href="/settings"  class="btn btn-outline" style="justify-content:flex-start;">⚙️ Calendar Settings</a>
+      <a href="/billing"   class="btn btn-outline" style="justify-content:flex-start;">💳 Billing & Stripe</a>
+    </div>
+  </div>
+</div>
+<div class="card" style="max-width:480px;">
+  <h2>🗄️ Data Files</h2>
+  <table>
+    <thead><tr><th>File</th><th>Status</th></tr></thead>
+    <tbody>
+      {''.join(f'<tr><td style="font-size:12px;font-family:monospace;">{fp}</td><td><span class="badge {"badge-success" if os.path.exists(fp) else "badge-danger"}">{"✓ exists" if os.path.exists(fp) else "missing"}</span></td></tr>' for fp in [PROFILES_FILE, LEDGER_FILE, PRICING_FILE, INVOICES_FILE, SETTINGS_FILE])}
+    </tbody>
+  </table>
+</div>"""
+    return HTMLResponse(page("Admin", content, "admin"))
+
+
+@app.get("/api/backup")
+def backup_json():
+    profiles = get_all_profiles()
+    ledger   = []
+    if os.path.exists(LEDGER_FILE):
+        with open(LEDGER_FILE, 'r') as f:
+            for row in _ledger_reader(f):
+                ledger.append(dict(row))
+    return JSONResponse(
+        content={"backup_date": datetime.now().isoformat(),
+                 "students": profiles, "ledger": ledger,
+                 "stats": {"total_students": len(profiles),
+                           "total_revenue": calculate_total_revenue()}},
+        headers={"Content-Disposition": "attachment; filename=studio_backup.json"},
+    )
+
+
+@app.get("/api/backup/csv")
+def backup_csv():
+    import zipfile
+    from io import BytesIO
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for fp in [PROFILES_FILE, LEDGER_FILE, PRICING_FILE, INVOICES_FILE]:
+            if os.path.exists(fp):
+                zf.write(fp, arcname=os.path.basename(fp))
+    buf.seek(0)
+    return Response(content=buf.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition": "attachment; filename=studio_backup.zip"})
 
