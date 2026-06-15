@@ -144,22 +144,155 @@ app = FastAPI(title="Studio App")
 # Create static directory
 os.makedirs("static", exist_ok=True)
 
-# CSS
+# CSS — full design system (sidebar layout)
 css_content = """
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; margin: 0; }
-.container { max-width: 1200px; margin: 0 auto; }
-.card { background: white; border-radius: 24px; padding: 30px; margin-bottom: 24px; box-shadow: 0 10px 40px rgba(0,0,0,0.1); }
-h1 { font-size: 48px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0 0 10px 0; }
-.btn { display: inline-block; padding: 12px 24px; border-radius: 12px; text-decoration: none; font-weight: 600; background: #667eea; color: white; margin: 5px; }
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }
-table { width: 100%; border-collapse: collapse; }
-th { background: #667eea; color: white; padding: 12px; text-align: left; }
-td { padding: 12px; border-bottom: 1px solid #eee; }
-input, select { width: 100%; padding: 10px; margin: 5px 0; border: 2px solid #e5e7eb; border-radius: 8px; }
+:root{--primary:#6366f1;--primary-dark:#4f46e5;--secondary:#8b5cf6;--success:#10b981;--warning:#f59e0b;--danger:#ef4444;--dark:#1e293b;--muted:#64748b;--border:#e2e8f0;--bg:#f1f5f9;--sidebar:#0f172a;--sw:256px;}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--dark);min-height:100vh;font-size:14px;line-height:1.5;}
+.layout{display:flex;min-height:100vh;}
+.sidebar{width:var(--sw);background:var(--sidebar);position:fixed;top:0;left:0;bottom:0;display:flex;flex-direction:column;z-index:200;transition:transform .3s;overflow-y:auto;}
+.sidebar-brand{padding:18px 14px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;gap:12px;flex-shrink:0;}
+.brand-icon{width:36px;height:36px;border-radius:9px;background:linear-gradient(135deg,var(--primary),var(--secondary));display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;}
+.brand-name{color:#fff;font-size:14px;font-weight:700;}.brand-sub{color:rgba(255,255,255,.3);font-size:10px;margin-top:1px;}
+.sidebar-nav{flex:1;padding:10px 10px;}.nav-group{margin-bottom:18px;}
+.nav-group-label{color:rgba(255,255,255,.28);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.1px;padding:0 8px;margin-bottom:5px;}
+.nav-link{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:7px;text-decoration:none;color:rgba(255,255,255,.5);font-size:13px;font-weight:500;transition:all .15s;margin-bottom:1px;}
+.nav-link:hover{background:rgba(255,255,255,.07);color:rgba(255,255,255,.9);}
+.nav-link.active{background:linear-gradient(135deg,var(--primary),var(--secondary));color:#fff;box-shadow:0 2px 8px rgba(99,102,241,.4);}
+.nav-icon{font-size:15px;width:17px;text-align:center;flex-shrink:0;}
+.sidebar-footer{padding:10px;border-top:1px solid rgba(255,255,255,.06);flex-shrink:0;}
+.main{margin-left:var(--sw);flex:1;display:flex;flex-direction:column;min-height:100vh;}
+.topbar{background:#fff;border-bottom:1px solid var(--border);padding:0 26px;height:58px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;}
+.topbar-title{font-size:16px;font-weight:700;color:var(--dark);}
+.topbar-right{display:flex;align-items:center;gap:8px;}
+.page-body{padding:26px;flex:1;}
+.card{background:#fff;border-radius:14px;padding:22px;border:1px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,.04);margin-bottom:18px;}
+.card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+.card-title{font-size:14px;font-weight:700;color:var(--dark);}
+.stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:22px;}
+.stat-card{background:#fff;border:1px solid var(--border);border-radius:13px;padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.04);}
+.stat-icon{width:38px;height:38px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px;margin-bottom:10px;}
+.stat-val{font-size:24px;font-weight:800;color:var(--dark);}
+.stat-lbl{font-size:11px;color:var(--muted);font-weight:500;margin-top:2px;text-transform:uppercase;letter-spacing:.4px;}
+h1{font-size:22px;font-weight:800;color:var(--dark);}
+h2{font-size:16px;font-weight:700;color:var(--dark);margin-bottom:12px;}
+h3{font-size:14px;font-weight:700;color:var(--dark);}
+.btn{display:inline-flex;align-items:center;gap:5px;padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;cursor:pointer;border:none;outline:none;transition:all .15s;white-space:nowrap;background:linear-gradient(135deg,var(--primary),var(--secondary));color:#fff;box-shadow:0 1px 4px rgba(99,102,241,.3);margin:2px;}
+.btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(99,102,241,.4);}
+.btn:active{transform:none;}
+.btn-success{background:var(--success);box-shadow:0 1px 4px rgba(16,185,129,.3);}
+.btn-success:hover{box-shadow:0 4px 12px rgba(16,185,129,.4);}
+.btn-danger{background:var(--danger);box-shadow:0 1px 4px rgba(239,68,68,.3);}
+.btn-danger:hover{box-shadow:0 4px 12px rgba(239,68,68,.4);}
+.btn-warning{background:var(--warning);color:#fff;}
+.btn-outline{background:transparent;color:var(--primary);border:1.5px solid var(--border);box-shadow:none;}
+.btn-outline:hover{border-color:var(--primary);background:#f5f3ff;transform:none;box-shadow:none;}
+.btn-ghost{background:transparent;color:var(--muted);box-shadow:none;}
+.btn-ghost:hover{background:var(--bg);color:var(--dark);transform:none;box-shadow:none;}
+.btn-sm{padding:5px 11px;font-size:12px;border-radius:6px;margin:2px;}
+table{width:100%;border-collapse:collapse;}
+thead th{background:var(--bg);color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:9px 13px;text-align:left;border-bottom:1px solid var(--border);}
+tbody td{padding:11px 13px;border-bottom:1px solid var(--border);color:var(--dark);}
+tbody tr:last-child td{border-bottom:none;}
+tbody tr:hover td{background:#fafaff;}
+.form-group{margin-bottom:14px;}
+.form-label{display:block;font-size:12px;font-weight:600;color:var(--dark);margin-bottom:4px;}
+input[type=text],input[type=number],input[type=date],input[type=time],input[type=password],input[type=email],select,textarea{width:100%;padding:8px 11px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;color:var(--dark);background:#fff;transition:border-color .15s;outline:none;font-family:inherit;margin:0;}
+input:focus,select:focus,textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(99,102,241,.1);}
+.badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;}
+.badge-success{background:#d1fae5;color:#065f46;}.badge-danger{background:#fee2e2;color:#991b1b;}
+.badge-warning{background:#fef3c7;color:#92400e;}.badge-info{background:#e0e7ff;color:#3730a3;}
+.badge-muted{background:var(--bg);color:var(--muted);}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px;}
+.three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;}
+.container{max-width:1100px;margin:0 auto;padding:24px;}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;}
+.alert{padding:12px 16px;border-radius:9px;margin-bottom:14px;font-size:13px;font-weight:500;}
+.alert-warning{background:#fef3c7;color:#92400e;border:1px solid #fde68a;}
+.alert-success{background:#d1fae5;color:#065f46;border:1px solid #a7f3d0;}
+.alert-danger{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;}
+.alert-info{background:#e0e7ff;color:#3730a3;border:1px solid #c7d2fe;}
+.login-wrap{min-height:100vh;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px;}
+.login-card{background:#fff;border-radius:18px;padding:36px;width:100%;max-width:390px;border:1px solid var(--border);box-shadow:0 8px 32px rgba(0,0,0,.08);}
+.login-logo{width:52px;height:52px;border-radius:13px;background:linear-gradient(135deg,var(--primary),var(--secondary));display:flex;align-items:center;justify-content:center;font-size:24px;margin:0 auto 18px;}
+.menu-btn{display:none;background:none;border:none;font-size:20px;cursor:pointer;color:var(--dark);padding:4px;}
+.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:150;}
+@media(max-width:768px){
+  .sidebar{transform:translateX(-100%);}
+  .sidebar.open{transform:translateX(0);}
+  .sidebar-overlay.open{display:block;}
+  .main{margin-left:0;}
+  .page-body{padding:14px;}
+  .topbar{padding:0 14px;}
+  .menu-btn{display:block;}
+  .two-col,.three-col,.grid{grid-template-columns:1fr;}
+  h1{font-size:18px;}
+}
 """
 
 with open("static/style.css", "w") as f:
     f.write(css_content)
+
+
+def page(title: str, content: str, active: str = "dashboard") -> str:
+    """Render a full page with the dark sidebar layout."""
+    links = [
+        ("dashboard", "/dashboard",  "🏠", "Dashboard"),
+        ("students",  "/students",   "👥", "Students"),
+        ("rates",     "/rates",      "💰", "Rates"),
+        ("payments",  "/payments",   "💳", "Payments"),
+        ("schedule",  "/schedule",   "📅", "Schedule"),
+        ("billing",   "/billing",    "🧾", "Billing"),
+    ]
+    nav_html = "".join(
+        f'<a href="{href}" class="nav-link{" active" if k == active else ""}">'
+        f'<span class="nav-icon">{icon}</span>{label}</a>\n'
+        for k, href, icon, label in links
+    )
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title} — Studio Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="sidebar-overlay" id="overlay" onclick="closeSidebar()"></div>
+<div class="layout">
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <div class="brand-icon">🎵</div>
+    <div><div class="brand-name">Studio Console</div><div class="brand-sub">Music Studio Manager</div></div>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-group">
+      <div class="nav-group-label">Navigation</div>
+      {nav_html}
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a href="/logout" class="nav-link"><span class="nav-icon">🚪</span>Logout</a>
+  </div>
+</aside>
+<div class="main">
+  <header class="topbar">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <button class="menu-btn" onclick="openSidebar()">☰</button>
+      <span class="topbar-title">{title}</span>
+    </div>
+  </header>
+  <div class="page-body">{content}</div>
+</div>
+</div>
+<script>
+function openSidebar(){{document.getElementById('sidebar').classList.add('open');document.getElementById('overlay').classList.add('open');}}
+function closeSidebar(){{document.getElementById('sidebar').classList.remove('open');document.getElementById('overlay').classList.remove('open');}}
+</script>
+</body>
+</html>"""
+
 
 # Password file
 PASSWORD_FILE = "admin_password.json"
@@ -222,7 +355,8 @@ def save_pricing_tiers(tiers_map):
 # Dashboard with Calendar
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard():
-    calendar_html = ""
+    calendar_items = ""
+    cal_header = '<a href="/calendar-auth" class="btn btn-outline btn-sm">Connect Calendar</a>'
     if os.path.exists('calendar_token.json'):
         try:
             with open('calendar_token.json', 'r') as f:
@@ -232,85 +366,101 @@ def dashboard():
             tz = pytz.timezone('America/New_York')
             now = datetime.now(tz)
             start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            end = now.replace(hour=23, minute=59, second=59, microsecond=0)
-            start_utc = start.astimezone(pytz.UTC).isoformat()
-            end_utc = end.astimezone(pytz.UTC).isoformat()
-            events = service.events().list(calendarId='primary', timeMin=start_utc, timeMax=end_utc, singleEvents=True).execute().get('items', [])
+            end   = now.replace(hour=23, minute=59, second=59, microsecond=0)
+            events = service.events().list(
+                calendarId='primary',
+                timeMin=start.astimezone(pytz.UTC).isoformat(),
+                timeMax=end.astimezone(pytz.UTC).isoformat(),
+                singleEvents=True
+            ).execute().get('items', [])
+            cal_header = f'<span class="badge badge-success">Connected</span>'
             if events:
-                calendar_html = '<div class="card"><h2>📅 Today\'s Lessons</h2><ul style="list-style:none; padding:0;">'
                 for e in events:
                     summary = e.get('summary', 'Lesson')
-                    start_time = e.get('start', {}).get('dateTime', 'All day')
-                    if start_time and 'T' in start_time:
-                        dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-                        local_dt = dt.astimezone(tz)
-                        start_time = local_dt.strftime('%I:%M %p')
-                    calendar_html += f'<li style="padding:8px 0; border-bottom:1px solid #eee;">🎵 <strong>{summary}</strong> at {start_time}</li>'
-                calendar_html += '</ul></div>'
+                    t = e.get('start', {}).get('dateTime', '')
+                    if t:
+                        t = datetime.fromisoformat(t.replace('Z', '+00:00')).astimezone(tz).strftime('%I:%M %p')
+                    else:
+                        t = 'All day'
+                    calendar_items += (f'<div class="event-item">'
+                                       f'<div class="event-name">🎵 {summary}</div>'
+                                       f'<div class="event-meta">{t}</div></div>')
             else:
-                calendar_html = '<div class="card"><h2>📅 Today\'s Lessons</h2><p>No lessons scheduled today.</p><a href="/schedule" class="btn">Schedule</a></div>'
-        except Exception as e:
-            calendar_html = f'<div class="card"><h2>📅 Calendar</h2><p><a href="/calendar-auth">Connect Calendar</a></p><p style="color:#999;font-size:12px;">Error: {str(e)[:50]}</p></div>'
+                calendar_items = '<p style="color:var(--muted);font-size:13px;">No lessons scheduled today.</p>'
+        except Exception as exc:
+            calendar_items = f'<p style="color:var(--muted);font-size:13px;">{str(exc)[:80]}</p>'
     else:
-        calendar_html = '<div class="card"><h2>📅 Google Calendar</h2><p><a href="/calendar-auth">Connect Calendar</a> to see your lessons.</p></div>'
-    
-    return HTMLResponse(f"""
-    <!DOCTYPE html>
-    <html>
-    <head><title>Studio Dashboard</title><link rel="stylesheet" href="/static/style.css"></head>
-    <body>
-        <div class="container">
-            <div class="card" style="text-align: center;">
-                <h1>🎵 Studio Console</h1>
-                <p>Welcome to your music studio management system</p>
-            </div>
-            {calendar_html}
-            <div class="grid">
-                <a href="/students" class="card" style="text-align: center; text-decoration: none; color: #333;">
-                    <div style="font-size: 48px;">👥</div>
-                    <h3>Students</h3>
-                </a>
-                <a href="/rates" class="card" style="text-align: center; text-decoration: none; color: #333;">
-                    <div style="font-size: 48px;">💰</div>
-                    <h3>Rates</h3>
-                </a>
-                <a href="/schedule" class="card" style="text-align: center; text-decoration: none; color: #333;">
-                    <div style="font-size: 48px;">📅</div>
-                    <h3>Schedule</h3>
-                </a>
-                <a href="/logout" class="card" style="text-align: center; text-decoration: none; color: #333;">
-                    <div style="font-size: 48px;">🚪</div>
-                    <h3>Logout</h3>
-                </a>
-            </div>
-        </div>
-    </body>
-    </html>
-    """)
+        calendar_items = '<p style="color:var(--muted);font-size:13px;">Connect Google Calendar to see today\'s lessons.</p>'
+
+    profiles = get_all_profiles()
+    content = f"""
+<h1>Dashboard</h1>
+<div class="stats-row">
+  <div class="stat-card">
+    <div class="stat-icon" style="background:#ede9fe;">👥</div>
+    <div class="stat-val">{len(profiles)}</div>
+    <div class="stat-lbl">Students</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:#d1fae5;">📅</div>
+    <div class="stat-val">{datetime.now().strftime('%b %d')}</div>
+    <div class="stat-lbl">Today</div>
+  </div>
+</div>
+<div class="two-col">
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">📅 Today's Lessons</span>
+      {cal_header}
+    </div>
+    {calendar_items or '<p style="color:var(--muted);font-size:13px;">No events.</p>'}
+  </div>
+  <div class="card">
+    <div class="card-title" style="margin-bottom:14px;">Quick Actions</div>
+    <a href="/students" class="btn" style="display:block;margin-bottom:8px;">👥 Manage Students</a>
+    <a href="/schedule" class="btn btn-success" style="display:block;margin-bottom:8px;">📅 Schedule Lesson</a>
+    <a href="/payments" class="btn btn-warning" style="display:block;margin-bottom:8px;">💳 Record Payment</a>
+    <a href="/billing"  class="btn btn-outline"  style="display:block;">🧾 Billing</a>
+  </div>
+</div>"""
+    return HTMLResponse(page("Dashboard", content, active="dashboard"))
+
 
 # Login
 @app.get("/login", response_class=HTMLResponse)
 def login_page(error: str = ""):
-    error_html = f'<div style="background:#fee;color:#c33;padding:10px;border-radius:8px;">{error}</div>' if error else ''
-    return HTMLResponse(f"""
-    <!DOCTYPE html>
-    <html>
-    <head><title>Login</title><link rel="stylesheet" href="/static/style.css"></head>
-    <body>
-        <div class="container" style="max-width:400px;">
-            <div class="card">
-                <h1>🎵 Studio Login</h1>
-                {error_html}
-                <form action="/login" method="post">
-                    <input type="text" name="username" placeholder="Username" required>
-                    <input type="password" name="password" placeholder="Password" required>
-                    <button type="submit" class="btn" style="width:100%;">Login</button>
-                </form>
-            </div>
-        </div>
-    </body>
-    </html>
-    """)
+    error_html = f'<div class="alert alert-danger">{error}</div>' if error else ''
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Login — Studio Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="login-logo">🎵</div>
+    <h1 style="text-align:center;margin-bottom:4px;">Studio Console</h1>
+    <p style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:22px;">Sign in to your studio</p>
+    {error_html}
+    <form action="/login" method="post">
+      <div class="form-group">
+        <label class="form-label">Username</label>
+        <input type="text" name="username" placeholder="admin" required autofocus>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input type="password" name="password" placeholder="••••••••" required>
+      </div>
+      <button type="submit" class="btn" style="width:100%;justify-content:center;padding:10px;">Sign In</button>
+    </form>
+  </div>
+</div>
+</body>
+</html>""")
 
 @app.post("/login")
 def login_post(username: str = Form(...), password: str = Form(...)):
@@ -977,45 +1127,26 @@ def billing_page(success: str = "", checkout_cancelled: str = "",
     else:
         history_html = '<div class="card" style="color:#94a3b8;">No billing history yet.</div>'
 
-    return HTMLResponse(f"""<!DOCTYPE html>
-<html>
-<head>
-  <title>Billing &amp; Subscription</title>
-  <link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
-  <div class="container">
-    <div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;
-                  flex-wrap:wrap;gap:12px;margin-bottom:8px;">
-        <h1 style="margin:0;">💳 Billing &amp; Subscription</h1>
-        <a href="/dashboard" style="color:#667eea;font-size:14px;">← Dashboard</a>
-      </div>
-      <p style="color:#64748b;margin:0 0 24px;">Studio Console Monthly</p>
-      {notice}
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;
-                  padding:20px;margin-bottom:8px;">
-        <div style="display:flex;align-items:flex-start;justify-content:space-between;
-                    gap:12px;flex-wrap:wrap;">
-          <div>
-            <div style="font-size:18px;font-weight:700;color:#1e293b;">
-              Studio Console Monthly</div>
-            <div style="color:#64748b;font-size:15px;margin-top:2px;">$15 / month</div>
-            {pm_html}
-            {nd_html}
-          </div>
-          <span style="background:{bc}22;color:{bc};border:1px solid {bc}44;
-            padding:5px 14px;border-radius:20px;font-size:13px;font-weight:700;
-            white-space:nowrap;">{bl}</span>
-        </div>
-        {cancel_warn}
-        {action}
-      </div>
+    content = f"""
+<h1>💳 Billing &amp; Subscription</h1>
+{notice}
+<div class="card">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+    <div>
+      <div style="font-size:16px;font-weight:700;">Studio Console Monthly</div>
+      <div style="color:var(--muted);font-size:14px;margin-top:2px;">$15 / month</div>
+      {pm_html}
+      {nd_html}
     </div>
-    {history_html}
+    <span style="background:{bc}22;color:{bc};border:1px solid {bc}44;
+      padding:5px 14px;border-radius:20px;font-size:12px;font-weight:700;
+      white-space:nowrap;">{bl}</span>
   </div>
-</body>
-</html>""")
+  {cancel_warn}
+  {action}
+</div>
+{history_html}"""
+    return HTMLResponse(page("Billing & Subscription", content, active="billing"))
 
 
 @app.post("/billing/portal")
