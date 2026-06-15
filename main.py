@@ -228,6 +228,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--primary);box-shadow:0
   .two-col,.three-col,.grid{grid-template-columns:1fr;}
   h1{font-size:18px;}
 }
+.toast-container{position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:10px;pointer-events:none;}
+.toast{background:#1e293b;color:#fff;padding:12px 18px;border-radius:10px;font-size:13px;font-weight:500;box-shadow:0 4px 16px rgba(0,0,0,.18);display:flex;align-items:center;gap:10px;opacity:1;transform:translateY(0);transition:opacity .4s ease,transform .4s ease;pointer-events:auto;}
+.toast.toast-success{border-left:3px solid #10b981;}.toast.toast-error{border-left:3px solid #ef4444;}.toast.toast-info{border-left:3px solid #6366f1;}
+.toast.hiding{opacity:0;transform:translateY(8px);}
+@media(max-width:600px){.toast-container{bottom:16px;right:16px;left:16px;}.toast{max-width:100%;}}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.empty-state{text-align:center;padding:48px 24px;color:var(--muted);}
+.empty-state-icon{font-size:48px;margin-bottom:14px;opacity:.6;}
+.empty-state h3{font-size:15px;font-weight:700;color:var(--dark);margin-bottom:6px;}
+.empty-state p{font-size:13px;max-width:320px;margin:0 auto 18px;}
 """
 
 with open("static/style.css", "w") as f:
@@ -295,9 +306,50 @@ def page(title: str, content: str, active: str = "dashboard") -> str:
   <div class="page-body">{content}</div>
 </div>
 </div>
+<div class="toast-container" id="toastContainer"></div>
 <script>
 function openSidebar(){{document.getElementById('sidebar').classList.add('open');document.getElementById('overlay').classList.add('open');}}
 function closeSidebar(){{document.getElementById('sidebar').classList.remove('open');document.getElementById('overlay').classList.remove('open');}}
+function showToast(msg, type){{
+  var icons = {{success:'✅',error:'❌',info:'💬'}};
+  var t = document.createElement('div');
+  t.className = 'toast toast-' + (type||'success');
+  t.innerHTML = '<span>' + (icons[type||'success']||'') + '</span><span>' + msg + '</span>';
+  document.getElementById('toastContainer').appendChild(t);
+  setTimeout(function(){{t.classList.add('hiding');}}, 2800);
+  setTimeout(function(){{t.remove();}}, 3200);
+}}
+(function(){{
+  var p = new URLSearchParams(window.location.search);
+  var msg = p.get('toast');
+  if(msg) showToast(decodeURIComponent(msg.replace(/\+/g,' ')), p.get('toast_type')||'success');
+}})();
+document.addEventListener('keydown', function(e){{
+  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT'||e.isComposing) return;
+  if(e.metaKey||e.ctrlKey||e.altKey) return;
+  var k = e.key.toUpperCase();
+  if(k==='S'){{ e.preventDefault(); window.location.href='/schedule'; }}
+  if(k==='C'){{
+    var btn = document.querySelector('button[value="Confirmed"],form [name="status"] option[value="Confirmed"]');
+    var confirmForm = document.querySelector('form input[value="Confirmed"]');
+    if(confirmForm){{ confirmForm.closest('form').submit(); showToast('Lesson confirmed','success'); }}
+    else{{
+      var allBtns = document.querySelectorAll('.btn-success');
+      if(allBtns.length){{ allBtns[0].click(); }}
+    }}
+  }}
+  if(k==='M'){{
+    var missedInput = document.querySelector('form input[value="Missed"]');
+    if(missedInput){{ missedInput.closest('form').submit(); showToast('Marked as missed','info'); }}
+    else{{
+      var dangerBtns = document.querySelectorAll('.btn-danger');
+      if(dangerBtns.length){{ dangerBtns[0].click(); }}
+    }}
+  }}
+  if(k==='?'){{
+    showToast('Shortcuts: C = Confirm lesson · M = Mark missed · S = Schedule','info');
+  }}
+}});
 </script>
 </body>
 </html>"""
@@ -585,7 +637,7 @@ def compute_analytics():
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard():
     calendar_items = ""
-    cal_header = '<a href="/calendar-auth" class="btn btn-outline btn-sm">Connect Calendar</a>'
+    cal_header = '<a href="/calendar-auth" class="btn btn-outline btn-sm" onclick="this.innerHTML=\'<span class=\\\'spinner\\\'></span> Connecting…\';this.style.pointerEvents=\'none\';">Connect Calendar</a>'
     if os.path.exists('calendar_token.json'):
         try:
             with open('calendar_token.json', 'r') as f:
@@ -748,50 +800,148 @@ def students_page():
     profiles = get_all_profiles()
     rows = ""
     for name, data in profiles.items():
-        rows += f"<tr><td><strong>{name}</strong></td><td>${data['rate']}/hr</td><td>{data['credits']}</td><td>{data['description']}</td></tr>"
-    return HTMLResponse(f"""
-    <!DOCTYPE html>
-    <html>
-    <head><title>Students</title><link rel="stylesheet" href="/static/style.css"></head>
-    <body>
-        <div class="container"><div class="card"><h1>👥 Students</h1>{'<table><thead><tr><th>Name</th><th>Rate</th><th>Credits</th><th>Focus</th></tr></thead><tbody>' + rows if rows else '<p>No students yet</p>' + '</tbody></table>'}</div>
-        <div class="card"><h2>➕ Add Student</h2><form action="/add-profile" method="post"><input type="text" name="name" placeholder="Student Name" required><input type="text" name="rate_tier_name" placeholder="Pricing Tier" value="Standard"><input type="text" name="description" placeholder="Focus/Instrument"><button type="submit" class="btn">Create Profile</button></form></div>
-        <a href="/dashboard" class="btn">← Back</a></div>
-    </body>
-    </html>
-    """)
+        initials = ''.join(p[0].upper() for p in name.split()[:2])
+        prepaid  = data.get('prepaid', 0)
+        rows += f"""<tr>
+  <td><div style="display:flex;align-items:center;gap:10px;">
+    <div class="student-avatar" style="width:30px;height:30px;font-size:11px;border-radius:7px;">{initials}</div>
+    <strong>{name}</strong></div></td>
+  <td>${data['rate']:.0f}/hr</td>
+  <td>{data.get('target_minutes',60)} min</td>
+  <td>{data.get('description','') or '—'}</td>
+  <td><span class="badge badge-info">${prepaid:.2f}</span></td>
+  <td>
+    <form action="/delete-student" method="post" style="display:inline;"
+          onsubmit="return confirm('Delete {name}? This cannot be undone.')">
+      <input type="hidden" name="student_name" value="{name}">
+      <button type="submit" class="btn btn-danger btn-sm">🗑️ Delete</button>
+    </form>
+  </td>
+</tr>"""
+
+    if rows:
+        table_html = f"""<div style="overflow-x:auto;">
+  <table>
+    <thead><tr><th>Student</th><th>Rate</th><th>Lesson</th><th>Focus</th><th>Prepaid</th><th></th></tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+</div>"""
+    else:
+        table_html = """<div class="empty-state">
+  <div class="empty-state-icon">👥</div>
+  <h3>No students yet</h3>
+  <p>Add your first student below to start tracking lessons and payments.</p>
+  <a href="#add-student" class="btn">➕ Add Your First Student</a>
+</div>"""
+
+    content = f"""
+<div class="card">
+  <div class="card-header">
+    <h2 style="margin:0;">👥 Students ({len(profiles)})</h2>
+  </div>
+  {table_html}
+</div>
+<div class="card" id="add-student">
+  <h2>➕ Add Student</h2>
+  <form action="/add-profile" method="post">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+      <div class="form-group" style="margin:0;">
+        <label class="form-label">Student Name</label>
+        <input type="text" name="name" placeholder="Full name" required>
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label class="form-label">Pricing Tier</label>
+        <input type="text" name="rate_tier_name" placeholder="e.g. Standard" value="Standard">
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label class="form-label">Focus / Instrument</label>
+        <input type="text" name="description" placeholder="e.g. Piano, Drums">
+      </div>
+    </div>
+    <button type="submit" class="btn" style="margin-top:14px;">Create Profile</button>
+  </form>
+</div>"""
+    return HTMLResponse(page("Students", content, "students"))
+
 
 @app.post("/add-profile")
 def add_profile(name: str = Form(...), rate_tier_name: str = Form(...), description: str = Form(...)):
     profiles = get_all_profiles()
     profiles[name] = {"tier_name": rate_tier_name, "rate": DEFAULT_RATE, "target_minutes": 60, "credits": 0, "description": description}
     save_all_profiles(profiles)
-    return RedirectResponse(url="/students", status_code=303)
+    return RedirectResponse(url=f"/students?toast=Student+{name}+added", status_code=303)
+
+
+@app.post("/delete-student")
+def delete_student(student_name: str = Form(...)):
+    profiles = get_all_profiles()
+    if student_name in profiles:
+        del profiles[student_name]
+        save_all_profiles(profiles)
+    return RedirectResponse(url=f"/students?toast={student_name.replace(' ', '+')}+deleted&toast_type=info", status_code=303)
 
 @app.get("/rates", response_class=HTMLResponse)
 def rates_page():
     tiers = get_pricing_tiers()
     rows = ""
     for name, data in tiers.items():
-        rows += f"<tr><td><strong>{name}</strong></td><td>${data['rate']}/hr</td><td>{data['minutes']} min</td></tr>"
-    return HTMLResponse(f"""
-    <!DOCTYPE html>
-    <html>
-    <head><title>Rates</title><link rel="stylesheet" href="/static/style.css"></head>
-    <body>
-        <div class="container"><div class="card"><h1>💰 Pricing Tiers</h1>{'<table><thead><tr><th>Tier</th><th>Rate</th><th>Duration</th></tr></thead><tbody>' + rows if rows else '<p>No tiers yet</p>' + '</tbody></table>'}</div>
-        <div class="card"><h2>➕ Add Pricing Tier</h2><form action="/save-pricing-tier" method="post"><input type="text" name="tier_name" placeholder="Tier Name" required><input type="number" step="0.01" name="hourly_rate" placeholder="Hourly Rate" required><input type="number" name="target_minutes" placeholder="Minutes" value="60"><button type="submit" class="btn">Create Tier</button></form></div>
-        <a href="/dashboard" class="btn">← Back</a></div>
-    </body>
-    </html>
-    """)
+        per_lesson = round(data['rate'] * data['minutes'] / 60, 2)
+        rows += f"""<tr>
+  <td><strong>{name}</strong></td>
+  <td>${data['rate']:.2f}/hr</td>
+  <td>{data['minutes']} min</td>
+  <td style="color:var(--success);font-weight:600;">${per_lesson:.2f}/lesson</td>
+</tr>"""
+
+    if rows:
+        table_html = f"""<div style="overflow-x:auto;">
+  <table>
+    <thead><tr><th>Tier Name</th><th>Hourly Rate</th><th>Duration</th><th>Per Lesson</th></tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+</div>"""
+    else:
+        table_html = """<div class="empty-state">
+  <div class="empty-state-icon">💰</div>
+  <h3>No pricing tiers yet</h3>
+  <p>Create a tier (e.g. "1 Hour Standard" at $50/hr) to assign rates to students.</p>
+</div>"""
+
+    content = f"""
+<div class="two-col">
+  <div class="card">
+    <div class="card-header">
+      <h2 style="margin:0;">💰 Pricing Tiers ({len(tiers)})</h2>
+    </div>
+    {table_html}
+  </div>
+  <div class="card">
+    <h2>➕ Add Pricing Tier</h2>
+    <form action="/save-pricing-tier" method="post">
+      <div class="form-group">
+        <label class="form-label">Tier Name</label>
+        <input type="text" name="tier_name" placeholder="e.g. 1 Hour Standard" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Hourly Rate ($)</label>
+        <input type="number" step="0.01" name="hourly_rate" placeholder="50.00" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Duration (minutes)</label>
+        <input type="number" name="target_minutes" placeholder="60" value="60">
+      </div>
+      <button type="submit" class="btn">Create Tier</button>
+    </form>
+  </div>
+</div>"""
+    return HTMLResponse(page("Rates", content, "rates"))
 
 @app.post("/save-pricing-tier")
 def save_pricing_tier(tier_name: str = Form(...), hourly_rate: float = Form(...), target_minutes: int = Form(60)):
     tiers = get_pricing_tiers()
     tiers[tier_name] = {"rate": hourly_rate, "minutes": target_minutes}
     save_pricing_tiers(tiers)
-    return RedirectResponse(url="/rates", status_code=303)
+    return RedirectResponse(url="/rates?toast=Pricing+tier+saved", status_code=303)
 
 @app.get("/schedule", response_class=HTMLResponse)
 def schedule_page():
@@ -1062,8 +1212,7 @@ def record_payment(
     with open(LEDGER_FILE, 'a', newline='') as f:
         writer = csv.writer(f)
         writer.writerow([payment_date, student_name, "Payment", f"{amount:.2f}", full_notes])
-    
-    return RedirectResponse(url="/payments", status_code=303)
+    return RedirectResponse(url=f"/payments?toast=Payment+of+%24{amount:.2f}+recorded+for+{student_name.replace(' ', '+')}", status_code=303)
 @app.get("/test")
 def test():
     return {"status": "ok"}
@@ -1310,7 +1459,8 @@ def billing_page(success: str = "", checkout_cancelled: str = "",
             'Cancel Plan</button></form>')
         action = f"""
         <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:20px;">
-          <form method="post" action="/billing/portal" style="display:inline;">
+          <form method="post" action="/billing/portal" style="display:inline;"
+                onsubmit="var b=this.querySelector('button');b.disabled=true;b.innerHTML='<span class=\\'spinner\\'></span> Opening portal…';">
             <button type="submit" class="btn" style="margin:0;">Manage Billing</button>
           </form>
           {cancel_btn}
@@ -1318,7 +1468,8 @@ def billing_page(success: str = "", checkout_cancelled: str = "",
     elif configured:
         action = """
         <div style="margin-top:20px;">
-          <form method="post" action="/create-checkout-session">
+          <form method="post" action="/create-checkout-session"
+                onsubmit="var b=this.querySelector('button');b.disabled=true;b.innerHTML='<span class=\\'spinner\\'></span> Redirecting to Stripe…';">
             <button type="submit" class="btn"
               style="font-size:16px;padding:14px 32px;margin:0;">
               Subscribe — $15/month</button>
@@ -1686,7 +1837,7 @@ def mark_invoice_paid(invoice_id: str):
             inv['BalanceDue'] = '0.00'
             break
     save_all_invoices(invoices)
-    return RedirectResponse(url=f"/invoices/{invoice_id}", status_code=303)
+    return RedirectResponse(url=f"/invoices/{invoice_id}?toast=Invoice+marked+as+paid", status_code=303)
 
 
 # ─── Settings ─────────────────────────────────────────────────────────────────
@@ -1724,7 +1875,7 @@ def save_settings_post(lesson_keywords: str = Form(""), show_all: str = Form("fa
         "lesson_keywords": [k.strip() for k in lesson_keywords.split(',') if k.strip()],
         "show_all": show_all == "true",
     })
-    return RedirectResponse(url="/settings", status_code=303)
+    return RedirectResponse(url="/settings?toast=Settings+saved", status_code=303)
 
 
 # ─── Admin ────────────────────────────────────────────────────────────────────
