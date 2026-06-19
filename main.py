@@ -6,6 +6,7 @@ import csv
 from datetime import datetime
 import hashlib
 import json
+import re
 import pytz
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -462,6 +463,57 @@ def save_calendar_settings(settings):
         json.dump(settings, f, indent=2)
 
 
+def clean_student_name(title: str) -> str:
+    name = title.strip()
+    for p in [
+        r'^private\s+lesson\s*[:–\-]\s*',
+        r'^lesson\s+with\s+',
+        r'^lesson\s*[:–\-]\s*',
+        r'^(?:piano|guitar|violin|drums|voice|music)\s+lesson\s*[:–\-]\s*',
+    ]:
+        name = re.sub(p, '', name, flags=re.IGNORECASE).strip()
+    for s in [
+        r'\s*[-–]\s*private\s+lesson$',
+        r'\s*[-–]\s*lesson$',
+        r'\s*\(\d+\s*min\w*\)$',
+    ]:
+        name = re.sub(s, '', name, flags=re.IGNORECASE).strip()
+    return name
+
+
+def _suggested_rate(duration_minutes: int) -> float:
+    if duration_minutes <= 30:
+        return 30.0
+    elif duration_minutes <= 45:
+        return 40.0
+    elif duration_minutes <= 60:
+        return 50.0
+    return 75.0
+
+
+def get_today_calendar_events():
+    if not os.path.exists('calendar_token.json'):
+        return []
+    try:
+        with open('calendar_token.json', 'r') as f:
+            token_data = json.load(f)
+        creds = Credentials.from_authorized_user_info(token_data)
+        service = build('calendar', 'v3', credentials=creds)
+        tz = pytz.timezone('America/New_York')
+        now = datetime.now(tz)
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end   = now.replace(hour=23, minute=59, second=59, microsecond=0)
+        return service.events().list(
+            calendarId='primary',
+            timeMin=start.astimezone(pytz.UTC).isoformat(),
+            timeMax=end.astimezone(pytz.UTC).isoformat(),
+            singleEvents=True,
+            orderBy='startTime',
+        ).execute().get('items', [])
+    except Exception:
+        return []
+
+
 # ── Invoice helpers ───────────────────────────────────────────────────────────
 INVOICES_FILE   = "invoices.csv"
 INVOICE_HEADERS = ["ID", "Student", "Month", "Year", "LessonsCount",
@@ -636,44 +688,60 @@ def compute_analytics():
 # Dashboard with Calendar
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard():
+    profiles = get_all_profiles()
     calendar_items = ""
     cal_header = '<a href="/calendar-auth" class="btn btn-outline btn-sm" onclick="this.innerHTML=\'<span class=\\\'spinner\\\'></span> Connecting…\';this.style.pointerEvents=\'none\';">Connect Calendar</a>'
     if os.path.exists('calendar_token.json'):
         try:
-            with open('calendar_token.json', 'r') as f:
-                token_data = json.load(f)
-            creds = Credentials.from_authorized_user_info(token_data)
-            service = build('calendar', 'v3', credentials=creds)
             tz = pytz.timezone('America/New_York')
-            now = datetime.now(tz)
-            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            end   = now.replace(hour=23, minute=59, second=59, microsecond=0)
-            events = service.events().list(
-                calendarId='primary',
-                timeMin=start.astimezone(pytz.UTC).isoformat(),
-                timeMax=end.astimezone(pytz.UTC).isoformat(),
-                singleEvents=True
-            ).execute().get('items', [])
-            cal_header = f'<span class="badge badge-success">Connected</span>'
+            events = get_today_calendar_events()
+            cal_header = '<span class="badge badge-success">Connected</span>'
             if events:
                 for e in events:
-                    summary = e.get('summary', 'Lesson')
-                    t = e.get('start', {}).get('dateTime', '')
-                    if t:
-                        t = datetime.fromisoformat(t.replace('Z', '+00:00')).astimezone(tz).strftime('%I:%M %p')
-                    else:
-                        t = 'All day'
-                    calendar_items += (f'<div class="event-item">'
-                                       f'<div class="event-name">🎵 {summary}</div>'
-                                       f'<div class="event-meta">{t}</div></div>')
+                    summary  = e.get('summary', 'Lesson')
+                    start_dt = e.get('start', {}).get('dateTime', '')
+                    end_dt   = e.get('end',   {}).get('dateTime', '')
+                    t = 'All day'
+                    if start_dt:
+                        t = datetime.fromisoformat(start_dt.replace('Z', '+00:00')).astimezone(tz).strftime('%I:%M %p')
+                    dur = 60
+                    if start_dt and end_dt:
+                        try:
+                            s_dt = datetime.fromisoformat(start_dt.replace('Z', '+00:00'))
+                            e_dt = datetime.fromisoformat(end_dt.replace('Z', '+00:00'))
+                            dur  = max(15, int((e_dt - s_dt).total_seconds() / 60))
+                        except Exception:
+                            pass
+                    student_name  = clean_student_name(summary)
+                    is_registered = student_name in profiles
+                    quick_create_btn = ""
+                    if not is_registered and student_name:
+                        safe_name = student_name.replace('"', '&quot;')
+                        quick_create_btn = (
+                            f'<form action="/quick-create-student" method="post" style="margin-top:6px;">'
+                            f'<input type="hidden" name="student_name" value="{safe_name}">'
+                            f'<input type="hidden" name="duration_minutes" value="{dur}">'
+                            f'<input type="hidden" name="redirect_to" value="/dashboard">'
+                            f'<button type="submit" class="btn btn-success btn-sm">➕ Quick Create Student</button>'
+                            f'</form>'
+                        )
+                    reg_badge = ('' if is_registered else
+                                 '<span class="badge badge-warning" style="margin-left:6px;font-size:10px;">Not registered</span>')
+                    calendar_items += (
+                        f'<div style="padding:10px 0;border-bottom:1px solid var(--border);">'
+                        f'<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px;">'
+                        f'<span style="font-weight:600;">🎵 {summary}{reg_badge}</span>'
+                        f'<span style="color:var(--muted);font-size:12px;">{t} · {dur} min</span>'
+                        f'</div>'
+                        f'{quick_create_btn}'
+                        f'</div>'
+                    )
             else:
                 calendar_items = '<p style="color:var(--muted);font-size:13px;">No lessons scheduled today.</p>'
         except Exception as exc:
             calendar_items = f'<p style="color:var(--muted);font-size:13px;">{str(exc)[:80]}</p>'
     else:
         calendar_items = '<p style="color:var(--muted);font-size:13px;">Connect Google Calendar to see today\'s lessons.</p>'
-
-    profiles = get_all_profiles()
     content = f"""
 <h1>Dashboard</h1>
 <div class="stats-row">
@@ -834,6 +902,61 @@ def students_page():
   <a href="#add-student" class="btn">➕ Add Your First Student</a>
 </div>"""
 
+    # Calendar suggestions: unregistered students from today's events
+    cal_suggestions_html = ""
+    try:
+        cal_events = get_today_calendar_events()
+        seen, suggestions = set(), []
+        for e in cal_events:
+            summary      = e.get('summary', '')
+            student_name = clean_student_name(summary)
+            if student_name and student_name not in profiles and student_name not in seen:
+                seen.add(student_name)
+                start_dt = e.get('start', {}).get('dateTime', '')
+                end_dt   = e.get('end',   {}).get('dateTime', '')
+                dur = 60
+                if start_dt and end_dt:
+                    try:
+                        s_dt = datetime.fromisoformat(start_dt.replace('Z', '+00:00'))
+                        e_dt = datetime.fromisoformat(end_dt.replace('Z', '+00:00'))
+                        dur  = max(15, int((e_dt - s_dt).total_seconds() / 60))
+                    except Exception:
+                        pass
+                suggestions.append({'name': student_name, 'summary': summary, 'dur': dur})
+        if suggestions:
+            sug_rows = ""
+            for s in suggestions:
+                safe_name = s['name'].replace('"', '&quot;')
+                rate      = _suggested_rate(s['dur'])
+                sug_rows += f"""<tr>
+  <td><strong>{s['name']}</strong></td>
+  <td style="color:var(--muted);font-size:12px;">{s['summary']}</td>
+  <td>{s['dur']} min → ${rate:.0f}/hr</td>
+  <td>
+    <form action="/quick-create-student" method="post" style="display:inline;">
+      <input type="hidden" name="student_name" value="{safe_name}">
+      <input type="hidden" name="duration_minutes" value="{s['dur']}">
+      <input type="hidden" name="redirect_to" value="/students">
+      <button type="submit" class="btn btn-success btn-sm">➕ Quick Create</button>
+    </form>
+  </td>
+</tr>"""
+            cal_suggestions_html = f"""<div class="card" style="border-color:#fbbf24;background:#fffbeb;">
+  <div class="card-header">
+    <h2 style="margin:0;color:#92400e;">📅 Detected from Today's Calendar</h2>
+    <span class="badge badge-warning">{len(suggestions)} new</span>
+  </div>
+  <p style="color:var(--muted);font-size:13px;margin-bottom:12px;">These names appear in today's calendar events but aren't registered yet.</p>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Detected Name</th><th>Event Title</th><th>Suggested Rate</th><th></th></tr></thead>
+      <tbody>{sug_rows}</tbody>
+    </table>
+  </div>
+</div>"""
+    except Exception:
+        cal_suggestions_html = ""
+
     content = f"""
 <div class="card">
   <div class="card-header">
@@ -841,6 +964,7 @@ def students_page():
   </div>
   {table_html}
 </div>
+{cal_suggestions_html}
 <div class="card" id="add-student">
   <h2>➕ Add Student</h2>
   <form action="/add-profile" method="post">
@@ -879,6 +1003,36 @@ def delete_student(student_name: str = Form(...)):
         del profiles[student_name]
         save_all_profiles(profiles)
     return RedirectResponse(url=f"/students?toast={student_name.replace(' ', '+')}+deleted&toast_type=info", status_code=303)
+
+
+@app.post("/quick-create-student")
+def quick_create_student(
+    student_name: str = Form(...),
+    duration_minutes: int = Form(60),
+    redirect_to: str = Form("/dashboard"),
+):
+    name = clean_student_name(student_name)
+    if not name:
+        name = student_name.strip()
+    rate = _suggested_rate(duration_minutes)
+    profiles = get_all_profiles()
+    if name not in profiles:
+        profiles[name] = {
+            "tier_name": "Standard",
+            "rate": rate,
+            "target_minutes": duration_minutes,
+            "credits": 0,
+            "description": f"Auto-created from {duration_minutes} min calendar event",
+            "prepaid": 0.0,
+        }
+        save_all_profiles(profiles)
+    safe_redirect = redirect_to if redirect_to in ("/dashboard", "/students") else "/dashboard"
+    toast = name.replace(' ', '+')
+    return RedirectResponse(
+        url=f"{safe_redirect}?toast={toast}+added&toast_type=success",
+        status_code=303,
+    )
+
 
 @app.get("/rates", response_class=HTMLResponse)
 def rates_page():
