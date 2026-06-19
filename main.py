@@ -806,6 +806,9 @@ def login_page(error: str = ""):
       </div>
       <button type="submit" class="btn" style="width:100%;justify-content:center;padding:10px;">Sign In</button>
     </form>
+    <p style="text-align:center;margin-top:18px;font-size:13px;color:var(--muted);">
+      Don't have an account? <a href="/signup" style="color:var(--primary);font-weight:600;">Sign up here</a>
+    </p>
   </div>
 </div>
 </body>
