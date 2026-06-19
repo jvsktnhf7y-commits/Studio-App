@@ -3,8 +3,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 import os
 import csv
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
+import secrets
 import json
 import re
 import pytz
@@ -365,11 +366,69 @@ if not os.path.exists(PASSWORD_FILE):
 
 # Users file
 USERS_FILE    = "data/users.csv"
-USERS_HEADERS = ["name", "email", "password_hash", "is_beta_tester", "created_at"]
+USERS_HEADERS = [
+    "name", "email", "password_hash", "is_beta_tester", "created_at",
+    "is_verified", "verification_token", "reset_token", "reset_token_expires",
+]
 os.makedirs("data", exist_ok=True)
-if not os.path.exists(USERS_FILE):
-    with open(USERS_FILE, 'w', newline='') as _f:
-        csv.DictWriter(_f, fieldnames=USERS_HEADERS).writeheader()
+
+
+def _init_users_csv():
+    if not os.path.exists(USERS_FILE):
+        with open(USERS_FILE, 'w', newline='') as _f:
+            csv.DictWriter(_f, fieldnames=USERS_HEADERS).writeheader()
+        return
+    # Migrate: add missing columns to existing file without losing data
+    with open(USERS_FILE, 'r') as _f:
+        _r = csv.DictReader(_f)
+        _fields = list(_r.fieldnames or [])
+        _rows   = [dict(r) for r in _r]
+    if not set(USERS_HEADERS).issubset(set(_fields)):
+        with open(USERS_FILE, 'w', newline='') as _f:
+            _w = csv.DictWriter(_f, fieldnames=USERS_HEADERS)
+            _w.writeheader()
+            for _row in _rows:
+                # existing users are treated as already verified
+                _w.writerow({k: _row.get(k, 'true' if k == 'is_verified' else '') for k in USERS_HEADERS})
+
+_init_users_csv()
+
+
+# ── SendGrid email helper ─────────────────────────────────────────────────────
+SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY', '')
+SENDGRID_FROM    = os.environ.get('SENDGRID_FROM_EMAIL', 'noreply@studioconsole.app')
+
+
+def send_email(to: str, subject: str, body_html: str) -> bool:
+    if not SENDGRID_API_KEY:
+        print(f"[Email — no SENDGRID_API_KEY] To: {to} | {subject}")
+        return False
+    try:
+        from sendgrid import SendGridAPIClient
+        from sendgrid.helpers.mail import Mail
+        SendGridAPIClient(SENDGRID_API_KEY).send(
+            Mail(from_email=SENDGRID_FROM, to_emails=to,
+                 subject=subject, html_content=body_html)
+        )
+        return True
+    except ImportError:
+        import urllib.request
+        payload = json.dumps({
+            "personalizations": [{"to": [{"email": to}]}],
+            "from":    {"email": SENDGRID_FROM},
+            "subject": subject,
+            "content": [{"type": "text/html", "value": body_html}],
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.sendgrid.com/v3/mail/send", data=payload, method="POST",
+            headers={"Authorization": f"Bearer {SENDGRID_API_KEY}",
+                     "Content-Type": "application/json"},
+        )
+        urllib.request.urlopen(req, timeout=10)
+        return True
+    except Exception as exc:
+        print(f"[Email error] {exc}")
+        return False
 
 
 def get_all_users() -> list[dict]:
@@ -379,14 +438,29 @@ def get_all_users() -> list[dict]:
         return [dict(row) for row in csv.DictReader(f)]
 
 
-def save_user(name: str, email: str, password_hash: str):
+def update_user(email: str, **kwargs):
+    users = get_all_users()
+    with open(USERS_FILE, 'w', newline='') as f:
+        w = csv.DictWriter(f, fieldnames=USERS_HEADERS)
+        w.writeheader()
+        for u in users:
+            if u.get('email') == email:
+                u.update(kwargs)
+            w.writerow({k: u.get(k, '') for k in USERS_HEADERS})
+
+
+def save_user(name: str, email: str, password_hash: str, verification_token: str = ''):
     with open(USERS_FILE, 'a', newline='') as f:
         csv.DictWriter(f, fieldnames=USERS_HEADERS).writerow({
-            "name":           name,
-            "email":          email,
-            "password_hash":  password_hash,
-            "is_beta_tester": "true",
-            "created_at":     datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "name":                name,
+            "email":               email,
+            "password_hash":       password_hash,
+            "is_beta_tester":      "true",
+            "created_at":          datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "is_verified":         "false" if verification_token else "true",
+            "verification_token":  verification_token,
+            "reset_token":         "",
+            "reset_token_expires": "",
         })
 
 # Data files
@@ -803,8 +877,9 @@ def dashboard():
 
 # Login
 @app.get("/login", response_class=HTMLResponse)
-def login_page(error: str = ""):
-    error_html = f'<div class="alert alert-danger">{error}</div>' if error else ''
+def login_page(error: str = "", info: str = ""):
+    error_html = f'<div class="alert alert-danger">{error}</div>'  if error else ''
+    info_html  = f'<div class="alert alert-success">{info}</div>'  if info  else ''
     return HTMLResponse(f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -820,11 +895,11 @@ def login_page(error: str = ""):
     <div class="login-logo">🎵</div>
     <h1 style="text-align:center;margin-bottom:4px;">Studio Console</h1>
     <p style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:22px;">Sign in to your studio</p>
-    {error_html}
+    {info_html}{error_html}
     <form action="/login" method="post">
       <div class="form-group">
-        <label class="form-label">Username</label>
-        <input type="text" name="username" placeholder="admin" required autofocus>
+        <label class="form-label">Email or Username</label>
+        <input type="text" name="username" placeholder="you@example.com" required autofocus>
       </div>
       <div class="form-group">
         <label class="form-label">Password</label>
@@ -832,7 +907,10 @@ def login_page(error: str = ""):
       </div>
       <button type="submit" class="btn" style="width:100%;justify-content:center;padding:10px;">Sign In</button>
     </form>
-    <p style="text-align:center;margin-top:18px;font-size:13px;color:var(--muted);">
+    <p style="text-align:center;margin-top:14px;font-size:13px;">
+      <a href="/forgot-password" style="color:var(--muted);">Forgot password?</a>
+    </p>
+    <p style="text-align:center;margin-top:8px;font-size:13px;color:var(--muted);">
       Don't have an account? <a href="/signup" style="color:var(--primary);font-weight:600;">Sign up here</a>
     </p>
   </div>
@@ -843,7 +921,7 @@ def login_page(error: str = ""):
 @app.post("/login")
 def login_post(username: str = Form(...), password: str = Form(...)):
     input_hash = hashlib.sha256(password.encode()).hexdigest()
-    # Admin account
+    # Admin account (never requires email verification)
     if username == "admin":
         with open(PASSWORD_FILE, 'r') as f:
             if input_hash == json.load(f).get("password_hash", ""):
@@ -853,6 +931,12 @@ def login_post(username: str = Form(...), password: str = Form(...)):
     # Signed-up users (email login)
     for user in get_all_users():
         if user.get("email") == username and user.get("password_hash") == input_hash:
+            if user.get("is_verified", "true") != "true":
+                return RedirectResponse(
+                    url="/login?error=Please+verify+your+email+before+signing+in."
+                        "+Check+your+inbox+for+the+confirmation+link.",
+                    status_code=303,
+                )
             response = RedirectResponse(url="/dashboard", status_code=303)
             response.set_cookie(key="session", value="authenticated", httponly=True, max_age=86400)
             return response
@@ -884,22 +968,27 @@ def signup_page(error: str = ""):
     <h1 style="text-align:center;margin-bottom:4px;">Create Account</h1>
     <p style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:22px;">Join Studio Console</p>
     {error_html}
-    <form action="/signup" method="post">
+    <form action="/signup" method="post" id="signupForm">
       <div class="form-group">
         <label class="form-label">Full Name</label>
         <input type="text" name="name" placeholder="Jane Smith" required autofocus>
       </div>
       <div class="form-group">
         <label class="form-label">Email</label>
-        <input type="email" name="email" placeholder="you@example.com" required>
+        <input type="email" name="email" id="emailInput" placeholder="you@example.com" required
+               oninput="validateEmail(this)">
+        <div id="emailHint" style="font-size:11px;margin-top:4px;display:none;"></div>
       </div>
       <div class="form-group">
         <label class="form-label">Password</label>
-        <input type="password" name="password" placeholder="••••••••" required minlength="6">
+        <input type="password" name="password" id="pw1" placeholder="••••••••" required minlength="6"
+               oninput="checkMatch()">
       </div>
       <div class="form-group">
         <label class="form-label">Confirm Password</label>
-        <input type="password" name="confirm_password" placeholder="••••••••" required minlength="6">
+        <input type="password" name="confirm_password" id="pw2" placeholder="••••••••" required minlength="6"
+               oninput="checkMatch()">
+        <div id="pwHint" style="font-size:11px;margin-top:4px;display:none;"></div>
       </div>
       <button type="submit" class="btn" style="width:100%;justify-content:center;padding:10px;">Create Account</button>
     </form>
@@ -908,12 +997,44 @@ def signup_page(error: str = ""):
     </p>
   </div>
 </div>
+<script>
+function validateEmail(inp) {{
+  var hint = document.getElementById('emailHint');
+  var re = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;
+  if (inp.value && !re.test(inp.value)) {{
+    hint.style.display = 'block';
+    hint.style.color   = '#ef4444';
+    hint.textContent   = '⚠ Enter a valid email address';
+  }} else if (inp.value) {{
+    hint.style.display = 'block';
+    hint.style.color   = '#10b981';
+    hint.textContent   = '✓ Looks good';
+  }} else {{
+    hint.style.display = 'none';
+  }}
+}}
+function checkMatch() {{
+  var pw1 = document.getElementById('pw1').value;
+  var pw2 = document.getElementById('pw2').value;
+  var hint = document.getElementById('pwHint');
+  if (!pw2) {{ hint.style.display = 'none'; return; }}
+  hint.style.display = 'block';
+  if (pw1 === pw2) {{
+    hint.style.color   = '#10b981';
+    hint.textContent   = '✓ Passwords match';
+  }} else {{
+    hint.style.color   = '#ef4444';
+    hint.textContent   = '⚠ Passwords do not match';
+  }}
+}}
+</script>
 </body>
 </html>""")
 
 
 @app.post("/signup")
 def signup_post(
+    request:          Request,
     name:             str = Form(...),
     email:            str = Form(...),
     password:         str = Form(...),
@@ -923,13 +1044,209 @@ def signup_post(
         return RedirectResponse(url="/signup?error=Passwords+do+not+match", status_code=303)
     if len(password) < 6:
         return RedirectResponse(url="/signup?error=Password+must+be+at+least+6+characters", status_code=303)
+    email = email.strip().lower()
     if any(u.get("email") == email for u in get_all_users()):
         return RedirectResponse(url="/signup?error=An+account+with+that+email+already+exists", status_code=303)
     pw_hash = hashlib.sha256(password.encode()).hexdigest()
-    save_user(name.strip(), email.strip().lower(), pw_hash)
-    response = RedirectResponse(url="/dashboard", status_code=303)
-    response.set_cookie(key="session", value="authenticated", httponly=True, max_age=86400)
-    return response
+    token   = secrets.token_urlsafe(32)
+    save_user(name.strip(), email, pw_hash, verification_token=token)
+    base_url = str(request.base_url).rstrip('/')
+    confirm_url = f"{base_url}/confirm/{token}"
+    send_email(
+        to=email,
+        subject="Confirm your Studio Console account",
+        body_html=(
+            f"<p>Hi {name},</p>"
+            f"<p>Click the link below to verify your email address:</p>"
+            f"<p><a href='{confirm_url}' style='color:#6366f1;font-weight:600;'>"
+            f"Confirm my email</a></p>"
+            f"<p style='color:#64748b;font-size:12px;'>Or paste this URL: {confirm_url}</p>"
+            f"<p style='color:#64748b;font-size:12px;'>This link does not expire.</p>"
+        ),
+    )
+    return RedirectResponse(
+        url="/login?info=Account+created%21+Check+your+email+to+verify+your+account+before+signing+in.",
+        status_code=303,
+    )
+
+
+@app.get("/confirm/{token}", response_class=HTMLResponse)
+def confirm_email(token: str):
+    for user in get_all_users():
+        if user.get("verification_token") == token:
+            update_user(user["email"], is_verified="true", verification_token="")
+            return RedirectResponse(
+                url="/login?info=Email+verified%21+You+can+now+sign+in.",
+                status_code=303,
+            )
+    return HTMLResponse("""<!DOCTYPE html><html><head>
+<link rel="stylesheet" href="/static/style.css"></head><body>
+<div class="login-wrap"><div class="login-card">
+<div class="login-logo">🎵</div>
+<div class="alert alert-danger">This confirmation link is invalid or has already been used.</div>
+<p style="text-align:center;margin-top:14px;">
+  <a href="/login" style="color:var(--primary);font-weight:600;">Back to sign in</a>
+</p></div></div></body></html>""")
+
+
+_FORGOT_PW_PAGE = """<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Forgot Password — Studio Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head><body>
+<div class="login-wrap"><div class="login-card">
+  <div class="login-logo">🎵</div>
+  <h1 style="text-align:center;margin-bottom:4px;">Forgot Password</h1>
+  <p style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:22px;">
+    Enter your email and we'll send a reset link.</p>
+  {notice}
+  <form action="/forgot-password" method="post">
+    <div class="form-group">
+      <label class="form-label">Email</label>
+      <input type="email" name="email" placeholder="you@example.com" required autofocus>
+    </div>
+    <button type="submit" class="btn" style="width:100%;justify-content:center;padding:10px;">
+      Send Reset Link</button>
+  </form>
+  <p style="text-align:center;margin-top:18px;font-size:13px;color:var(--muted);">
+    <a href="/login" style="color:var(--primary);font-weight:600;">Back to sign in</a>
+  </p>
+</div></div></body></html>"""
+
+
+@app.get("/forgot-password", response_class=HTMLResponse)
+def forgot_password_page(info: str = ""):
+    notice = f'<div class="alert alert-success">{info}</div>' if info else ''
+    return HTMLResponse(_FORGOT_PW_PAGE.format(notice=notice))
+
+
+@app.post("/forgot-password")
+def forgot_password_post(request: Request, email: str = Form(...)):
+    email = email.strip().lower()
+    for user in get_all_users():
+        if user.get("email") == email:
+            token   = secrets.token_urlsafe(32)
+            expires = (datetime.now() + timedelta(hours=1)).timestamp()
+            update_user(email, reset_token=token, reset_token_expires=str(expires))
+            base_url   = str(request.base_url).rstrip('/')
+            reset_url  = f"{base_url}/reset-password/{token}"
+            send_email(
+                to=email,
+                subject="Reset your Studio Console password",
+                body_html=(
+                    f"<p>Hi {user.get('name', '')}!</p>"
+                    f"<p>Click the link below to reset your password. "
+                    f"This link expires in 1 hour.</p>"
+                    f"<p><a href='{reset_url}' style='color:#6366f1;font-weight:600;'>"
+                    f"Reset my password</a></p>"
+                    f"<p style='color:#64748b;font-size:12px;'>Or paste: {reset_url}</p>"
+                    f"<p style='color:#64748b;font-size:12px;'>"
+                    f"If you didn't request this, ignore this email.</p>"
+                ),
+            )
+            break
+    # Always show the same message to avoid email enumeration
+    return RedirectResponse(
+        url="/forgot-password?info=If+that+email+is+registered+you%27ll+receive+a+reset+link+shortly.",
+        status_code=303,
+    )
+
+
+@app.get("/reset-password/{token}", response_class=HTMLResponse)
+def reset_password_page(token: str, error: str = ""):
+    for user in get_all_users():
+        if user.get("reset_token") == token:
+            try:
+                expires = float(user.get("reset_token_expires", 0))
+            except ValueError:
+                expires = 0
+            if datetime.now().timestamp() > expires:
+                return HTMLResponse("""<!DOCTYPE html><html><head>
+<link rel="stylesheet" href="/static/style.css"></head><body>
+<div class="login-wrap"><div class="login-card">
+<div class="login-logo">🎵</div>
+<div class="alert alert-danger">This reset link has expired. Please request a new one.</div>
+<p style="text-align:center;margin-top:14px;">
+  <a href="/forgot-password" style="color:var(--primary);font-weight:600;">Request new link</a>
+</p></div></div></body></html>""")
+            error_html = f'<div class="alert alert-danger">{error}</div>' if error else ''
+            return HTMLResponse(f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reset Password — Studio Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head><body>
+<div class="login-wrap"><div class="login-card">
+  <div class="login-logo">🎵</div>
+  <h1 style="text-align:center;margin-bottom:4px;">Reset Password</h1>
+  <p style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:22px;">Choose a new password</p>
+  {error_html}
+  <form action="/reset-password/{token}" method="post">
+    <div class="form-group">
+      <label class="form-label">New Password</label>
+      <input type="password" name="password" id="pw1" placeholder="••••••••"
+             required minlength="6" autofocus oninput="checkMatch()">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Confirm New Password</label>
+      <input type="password" name="confirm_password" id="pw2" placeholder="••••••••"
+             required minlength="6" oninput="checkMatch()">
+      <div id="pwHint" style="font-size:11px;margin-top:4px;display:none;"></div>
+    </div>
+    <button type="submit" class="btn" style="width:100%;justify-content:center;padding:10px;">
+      Set New Password</button>
+  </form>
+</div></div>
+<script>
+function checkMatch(){{
+  var h=document.getElementById('pwHint');
+  var match=document.getElementById('pw1').value===document.getElementById('pw2').value;
+  h.style.display=document.getElementById('pw2').value?'block':'none';
+  h.style.color=match?'#10b981':'#ef4444';
+  h.textContent=match?'✓ Passwords match':'⚠ Passwords do not match';
+}}
+</script>
+</body></html>""")
+    return HTMLResponse("""<!DOCTYPE html><html><head>
+<link rel="stylesheet" href="/static/style.css"></head><body>
+<div class="login-wrap"><div class="login-card">
+<div class="login-logo">🎵</div>
+<div class="alert alert-danger">This reset link is invalid or has already been used.</div>
+<p style="text-align:center;margin-top:14px;">
+  <a href="/forgot-password" style="color:var(--primary);font-weight:600;">Request a new link</a>
+</p></div></div></body></html>""")
+
+
+@app.post("/reset-password/{token}")
+def reset_password_post(
+    token:            str,
+    password:         str = Form(...),
+    confirm_password: str = Form(...),
+):
+    if password != confirm_password:
+        return RedirectResponse(url=f"/reset-password/{token}?error=Passwords+do+not+match", status_code=303)
+    if len(password) < 6:
+        return RedirectResponse(url=f"/reset-password/{token}?error=Password+must+be+at+least+6+characters", status_code=303)
+    for user in get_all_users():
+        if user.get("reset_token") == token:
+            try:
+                expires = float(user.get("reset_token_expires", 0))
+            except ValueError:
+                expires = 0
+            if datetime.now().timestamp() > expires:
+                return RedirectResponse(url="/forgot-password?info=Link+expired.+Please+request+a+new+one.", status_code=303)
+            pw_hash = hashlib.sha256(password.encode()).hexdigest()
+            update_user(user["email"], password_hash=pw_hash, reset_token="", reset_token_expires="")
+            return RedirectResponse(
+                url="/login?info=Password+reset+successfully.+You+can+now+sign+in.",
+                status_code=303,
+            )
+    return RedirectResponse(url="/forgot-password?error=Invalid+or+expired+reset+link.", status_code=303)
 
 
 @app.get("/")
@@ -937,7 +1254,9 @@ def root():
     return RedirectResponse(url="/dashboard", status_code=303)
 
 # Auth middleware
-_PUBLIC_PATHS    = frozenset(["/login", "/logout", "/", "/test", "/signup"])
+_PUBLIC_PATHS    = frozenset([
+    "/login", "/logout", "/", "/test", "/signup", "/forgot-password",
+])
 _BILLING_PATHS   = frozenset(["/billing", "/create-checkout-session",
                                "/billing/portal", "/billing/cancel"])
 
@@ -949,7 +1268,8 @@ async def auth_middleware(request: Request, call_next):
     if path == '/webhook/stripe':
         return await call_next(request)
 
-    if path in _PUBLIC_PATHS or path.startswith("/static/"):
+    if (path in _PUBLIC_PATHS or path.startswith("/static/")
+            or path.startswith("/confirm/") or path.startswith("/reset-password/")):
         return await call_next(request)
 
     # All other paths require an authenticated session
