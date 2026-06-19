@@ -363,6 +363,32 @@ if not os.path.exists(PASSWORD_FILE):
     with open(PASSWORD_FILE, 'w') as f:
         json.dump({"password_hash": default_hash}, f)
 
+# Users file
+USERS_FILE    = "data/users.csv"
+USERS_HEADERS = ["name", "email", "password_hash", "is_beta_tester", "created_at"]
+os.makedirs("data", exist_ok=True)
+if not os.path.exists(USERS_FILE):
+    with open(USERS_FILE, 'w', newline='') as _f:
+        csv.DictWriter(_f, fieldnames=USERS_HEADERS).writeheader()
+
+
+def get_all_users() -> list[dict]:
+    if not os.path.exists(USERS_FILE):
+        return []
+    with open(USERS_FILE, 'r') as f:
+        return [dict(row) for row in csv.DictReader(f)]
+
+
+def save_user(name: str, email: str, password_hash: str):
+    with open(USERS_FILE, 'a', newline='') as f:
+        csv.DictWriter(f, fieldnames=USERS_HEADERS).writerow({
+            "name":           name,
+            "email":          email,
+            "password_hash":  password_hash,
+            "is_beta_tester": "true",
+            "created_at":     datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        })
+
 # Data files
 PROFILES_FILE = "student_profiles.csv"
 PRICING_FILE  = "pricing_tiers.csv"
@@ -816,15 +842,21 @@ def login_page(error: str = ""):
 
 @app.post("/login")
 def login_post(username: str = Form(...), password: str = Form(...)):
+    input_hash = hashlib.sha256(password.encode()).hexdigest()
+    # Admin account
     if username == "admin":
-        input_hash = hashlib.sha256(password.encode()).hexdigest()
         with open(PASSWORD_FILE, 'r') as f:
-            data = json.load(f)
-            if input_hash == data.get("password_hash", ""):
+            if input_hash == json.load(f).get("password_hash", ""):
                 response = RedirectResponse(url="/dashboard", status_code=303)
                 response.set_cookie(key="session", value="authenticated", httponly=True, max_age=86400)
                 return response
-    return RedirectResponse(url="/login?error=Invalid credentials", status_code=303)
+    # Signed-up users (email login)
+    for user in get_all_users():
+        if user.get("email") == username and user.get("password_hash") == input_hash:
+            response = RedirectResponse(url="/dashboard", status_code=303)
+            response.set_cookie(key="session", value="authenticated", httponly=True, max_age=86400)
+            return response
+    return RedirectResponse(url="/login?error=Invalid+credentials", status_code=303)
 
 @app.get("/logout")
 def logout():
@@ -832,12 +864,80 @@ def logout():
     response.delete_cookie("session")
     return response
 
+
+@app.get("/signup", response_class=HTMLResponse)
+def signup_page(error: str = ""):
+    error_html = f'<div class="alert alert-danger">{error}</div>' if error else ''
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign Up — Studio Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="login-logo">🎵</div>
+    <h1 style="text-align:center;margin-bottom:4px;">Create Account</h1>
+    <p style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:22px;">Join Studio Console</p>
+    {error_html}
+    <form action="/signup" method="post">
+      <div class="form-group">
+        <label class="form-label">Full Name</label>
+        <input type="text" name="name" placeholder="Jane Smith" required autofocus>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input type="email" name="email" placeholder="you@example.com" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input type="password" name="password" placeholder="••••••••" required minlength="6">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Confirm Password</label>
+        <input type="password" name="confirm_password" placeholder="••••••••" required minlength="6">
+      </div>
+      <button type="submit" class="btn" style="width:100%;justify-content:center;padding:10px;">Create Account</button>
+    </form>
+    <p style="text-align:center;margin-top:18px;font-size:13px;color:var(--muted);">
+      Already have an account? <a href="/login" style="color:var(--primary);font-weight:600;">Sign in</a>
+    </p>
+  </div>
+</div>
+</body>
+</html>""")
+
+
+@app.post("/signup")
+def signup_post(
+    name:             str = Form(...),
+    email:            str = Form(...),
+    password:         str = Form(...),
+    confirm_password: str = Form(...),
+):
+    if password != confirm_password:
+        return RedirectResponse(url="/signup?error=Passwords+do+not+match", status_code=303)
+    if len(password) < 6:
+        return RedirectResponse(url="/signup?error=Password+must+be+at+least+6+characters", status_code=303)
+    if any(u.get("email") == email for u in get_all_users()):
+        return RedirectResponse(url="/signup?error=An+account+with+that+email+already+exists", status_code=303)
+    pw_hash = hashlib.sha256(password.encode()).hexdigest()
+    save_user(name.strip(), email.strip().lower(), pw_hash)
+    response = RedirectResponse(url="/dashboard", status_code=303)
+    response.set_cookie(key="session", value="authenticated", httponly=True, max_age=86400)
+    return response
+
+
 @app.get("/")
 def root():
     return RedirectResponse(url="/dashboard", status_code=303)
 
 # Auth middleware
-_PUBLIC_PATHS    = frozenset(["/login", "/logout", "/", "/test"])
+_PUBLIC_PATHS    = frozenset(["/login", "/logout", "/", "/test", "/signup"])
 _BILLING_PATHS   = frozenset(["/billing", "/create-checkout-session",
                                "/billing/portal", "/billing/cancel"])
 
