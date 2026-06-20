@@ -3339,70 +3339,110 @@ def student_notes_page(student_name: str):
 
     notes_html = ""
     for n in notes:
-        notes_html += f"""
-<div style="padding:14px;border:1px solid var(--border);border-radius:10px;margin-bottom:12px;">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-    <strong style="font-size:13px;">{n.get('date','')}</strong>
-    {'<span class="badge badge-info">Has assignment</span>' if n.get('assignment','').strip() else ''}
-  </div>
-  {'<p style="margin:0 0 8px;font-size:13px;">'+n['notes']+'</p>' if n.get('notes','').strip() else ''}
-  {'<div style="background:#f0fdf4;border-left:3px solid #10b981;padding:8px 12px;border-radius:0 6px 6px 0;font-size:13px;"><strong>Assignment:</strong> '+n['assignment']+'</div>' if n.get('assignment','').strip() else ''}
-</div>"""
+        notes_html += (
+            '<div style="padding:14px;border:1px solid var(--border);border-radius:10px;margin-bottom:12px;">'
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
+            f'<strong style="font-size:13px;">{n.get("date","")}</strong>'
+            + ('<span class="badge badge-info">Has assignment</span>' if n.get('assignment','').strip() else '')
+            + '</div>'
+            + (f'<p style="margin:0 0 8px;font-size:13px;">{n["notes"]}</p>' if n.get('notes','').strip() else '')
+            + (f'<div style="background:#f0fdf4;border-left:3px solid #10b981;padding:8px 12px;border-radius:0 6px 6px 0;font-size:13px;"><strong>Assignment:</strong> {n["assignment"]}</div>' if n.get('assignment','').strip() else '')
+            + '</div>'
+        )
     if not notes_html:
         notes_html = '<p style="color:var(--muted);">No notes yet. Add the first one below.</p>'
 
-    code = profile.get('access_code', '')
+    code         = profile.get('access_code', '')
     parent_email = profile.get('parent_email', '')
 
-    content = f"""
-<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
-  <a href="/students" class="btn btn-outline btn-sm">← Students</a>
-  <h2 style="margin:0;">📝 Notes — {student_name}</h2>
-</div>
-<div class="two-col">
-  <div class="card">
-    <h3>Lesson Notes</h3>
-    {notes_html}
-    <h3 style="margin-top:20px;">Add Note</h3>
-    <form action="/students/{student_name}/add-note" method="post">
-      <div class="form-group">
-        <label class="form-label">Lesson Date</label>
-        <input type="date" name="date" value="{datetime.now().strftime('%Y-%m-%d')}" required>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Notes (visible to student & parent)</label>
-        <textarea name="notes" rows="3" placeholder="What was covered in today's lesson…" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit;resize:vertical;"></textarea>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Assignment</label>
-        <input type="text" name="assignment" placeholder="e.g. Practice scales for 15 min daily">
-      </div>
-      <button type="submit" class="btn btn-success">Save Note</button>
-    </form>
-  </div>
-  <div class="card">
-    <h3>Portal Access</h3>
-    <p style="color:var(--muted);font-size:13px;">Set the student's access code and linked parent account.</p>
-    <form action="/students/{student_name}/set-access-code" method="post" style="margin-bottom:20px;">
-      <div class="form-group">
-        <label class="form-label">Student Access Code</label>
-        <input type="text" name="access_code" value="{code}" placeholder="e.g. music123"
-               style="font-family:monospace;" maxlength="20">
-        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Student uses this + their name to log into the Student Portal</div>
-      </div>
-      <button type="submit" class="btn">Save Access Code</button>
-    </form>
-    <div style="padding:14px;background:#f8fafc;border-radius:8px;">
-      <div style="font-size:12px;color:var(--muted);margin-bottom:4px;">Student portal login:</div>
-      <a href="/student/login" style="font-family:monospace;font-size:13px;color:var(--primary);">/student/login</a>
-      <br><div style="font-size:12px;color:var(--muted);margin-top:8px;">Parent portal login:</div>
-      <a href="/parent/login" style="font-family:monospace;font-size:13px;color:var(--primary);">/parent/login</a>
-      <br><div style="font-size:12px;color:var(--muted);margin-top:8px;">Linked parent:</div>
-      <span style="font-size:13px;">{parent_email or '—'}</span>
-      <div style="font-size:11px;color:var(--muted);margin-top:4px;">Create parent accounts in the <a href="/admin#parent-accounts">Admin page</a>.</div>
-    </div>
-  </div>
-</div>"""
+    # Code display banner (shown when a code is already set)
+    code_display = (
+        '<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;'
+        'padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:12px;">'
+        f'<span style="font-family:monospace;font-size:22px;font-weight:700;letter-spacing:3px;color:#166534;">{code}</span>'
+        '<span style="font-size:11px;color:#166534;">Current code — share with student</span>'
+        '</div>'
+    ) if code else ''
+
+    # Parent section: show existing parent or creation form
+    if parent_email:
+        parent_section = (
+            '<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px 16px;">'
+            f'<span style="font-size:13px;">✅ Linked parent: <strong>{parent_email}</strong></span>'
+            '</div>'
+        )
+    else:
+        parent_section = (
+            f'<form action="/students/{student_name}/create-parent" method="post">'
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">'
+            '<div class="form-group" style="margin:0;">'
+            '<label class="form-label">Parent Name</label>'
+            '<input type="text" name="parent_name" placeholder="Jane Smith" required>'
+            '</div>'
+            '<div class="form-group" style="margin:0;">'
+            '<label class="form-label">Parent Email</label>'
+            '<input type="email" name="parent_email" placeholder="jane@example.com" required>'
+            '</div>'
+            '<div class="form-group" style="margin:0;grid-column:1/-1;">'
+            '<label class="form-label">Password</label>'
+            '<input type="password" name="password" minlength="6" placeholder="Min. 6 characters" required>'
+            '</div>'
+            '</div>'
+            '<button type="submit" class="btn btn-success">Create Parent Account</button>'
+            '</form>'
+        )
+
+    today = datetime.now().strftime('%Y-%m-%d')
+    content = (
+        f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">'
+        f'<a href="/students" class="btn btn-outline btn-sm">← Students</a>'
+        f'<h2 style="margin:0;">📝 Notes — {student_name}</h2>'
+        f'</div>'
+        f'<div class="two-col">'
+        # ── Left: lesson notes ──
+        f'<div class="card">'
+        f'<h3>Lesson Notes</h3>'
+        f'{notes_html}'
+        f'<h3 style="margin-top:20px;">Add Note</h3>'
+        f'<form action="/students/{student_name}/add-note" method="post">'
+        f'<div class="form-group"><label class="form-label">Lesson Date</label>'
+        f'<input type="date" name="date" value="{today}" required></div>'
+        f'<div class="form-group"><label class="form-label">Notes (visible to student &amp; parent)</label>'
+        f'<textarea name="notes" rows="3" placeholder="What was covered in today\'s lesson…"'
+        f' style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit;resize:vertical;"></textarea></div>'
+        f'<div class="form-group"><label class="form-label">Assignment</label>'
+        f'<input type="text" name="assignment" placeholder="e.g. Practice scales for 15 min daily"></div>'
+        f'<button type="submit" class="btn btn-success">Save Note</button>'
+        f'</form>'
+        f'</div>'
+        # ── Right: portal access ──
+        f'<div class="card">'
+        f'<h3>🔐 Student Portal Access</h3>'
+        f'<p style="color:var(--muted);font-size:13px;margin-bottom:16px;">'
+        f'Student logs in at <a href="/student/login" style="color:var(--primary);font-weight:600;">/student/login</a>'
+        f' using their name + this code.</p>'
+        f'{code_display}'
+        f'<form action="/students/{student_name}/set-access-code" method="post">'
+        f'<div class="form-group"><label class="form-label">Access Code</label>'
+        f'<div style="display:flex;gap:8px;">'
+        f'<input type="text" name="access_code" id="accessCodeInput" value="{code}"'
+        f' placeholder="e.g. piano42" style="font-family:monospace;letter-spacing:2px;" maxlength="20" required>'
+        f'<button type="button" class="btn btn-outline btn-sm" style="white-space:nowrap;"'
+        f' onclick="document.getElementById(\'accessCodeInput\').value=Math.floor(100000+Math.random()*900000).toString();">'
+        f'🎲 Generate</button>'
+        f'</div>'
+        f'<div style="font-size:11px;color:var(--muted);margin-top:4px;">6-digit codes are easy for students to type.</div>'
+        f'</div>'
+        f'<button type="submit" class="btn btn-success">Save Access Code</button>'
+        f'</form>'
+        f'<hr style="border:none;border-top:1px solid var(--border);margin:24px 0;">'
+        f'<h3>👨‍👩‍👧 Parent Portal Access</h3>'
+        f'<p style="color:var(--muted);font-size:13px;margin-bottom:16px;">'
+        f'Parent logs in at <a href="/parent/login" style="color:var(--primary);font-weight:600;">/parent/login</a>.</p>'
+        f'{parent_section}'
+        f'</div>'
+        f'</div>'
+    )
     return HTMLResponse(page(f"Notes — {student_name}", content, "students"))
 
 
@@ -3428,6 +3468,31 @@ def set_student_access_code(student_name: str, access_code: str = Form("")):
         url=f"/students/{student_name}/notes?toast=Access+code+updated",
         status_code=303,
     )
+
+
+@app.post("/students/{student_name}/create-parent")
+def create_parent_for_student(
+    student_name:  str,
+    parent_name:   str = Form(...),
+    parent_email:  str = Form(...),
+    password:      str = Form(...),
+):
+    parent_email = parent_email.strip().lower()
+    if any(u.get("email") == parent_email for u in get_all_users()):
+        return RedirectResponse(
+            url=f"/students/{student_name}/notes?toast=Email+already+exists&toast_type=error",
+            status_code=303,
+        )
+    pw_hash = hashlib.sha256(password.encode()).hexdigest()
+    save_user(parent_name.strip(), parent_email, pw_hash, role="parent", linked_student=student_name)
+    # Also store parent_email on the student profile for quick lookup
+    profiles = get_all_profiles()
+    if student_name in profiles:
+        profiles[student_name]['parent_email'] = parent_email
+        save_all_profiles(profiles)
+    log_event("feature", detail=f"create_parent:{student_name}")
+    toast = f"Parent+account+created+for+{student_name.replace(' ', '+')}"
+    return RedirectResponse(url=f"/students/{student_name}/notes?toast={toast}", status_code=303)
 
 
 # ─── Parent Portal ─────────────────────────────────────────────────────────────
