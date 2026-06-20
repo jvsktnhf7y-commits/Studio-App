@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 import os
@@ -675,6 +675,7 @@ def clean_student_name(title: str) -> str:
     ]:
         name = re.sub(p, '', name, flags=re.IGNORECASE).strip()
     for s in [
+        r"\s*'s\s+(?:\w+\s+)*(?:private\s+)?lesson$",
         r'\s*[-–]\s*private\s+lesson$',
         r'\s*[-–]\s*lesson$',
         r'\s*\(\d+\s*min\w*\)$',
@@ -714,6 +715,37 @@ def get_today_calendar_events():
         ).execute().get('items', [])
     except Exception:
         return []
+
+
+def get_upcoming_calendar_events(days: int = 28) -> list:
+    """Fetch calendar events for the next `days` days (used for recurring detection)."""
+    if not os.path.exists('/data/calendar_token.json'):
+        return []
+    try:
+        with open('/data/calendar_token.json', 'r') as f:
+            token_data = json.load(f)
+        creds   = Credentials.from_authorized_user_info(token_data)
+        service = build('calendar', 'v3', credentials=creds)
+        tz    = pytz.timezone('America/New_York')
+        now   = datetime.now(tz)
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end   = start + timedelta(days=days)
+        return service.events().list(
+            calendarId='primary',
+            timeMin=start.astimezone(pytz.UTC).isoformat(),
+            timeMax=end.astimezone(pytz.UTC).isoformat(),
+            singleEvents=True,
+            orderBy='startTime',
+        ).execute().get('items', [])
+    except Exception:
+        return []
+
+
+def _detect_recurring_names(events: list) -> set:
+    """Return cleaned student names that appear 2+ times in the event list."""
+    from collections import Counter
+    counts = Counter(clean_student_name(e.get('summary', '')) for e in events)
+    return {name for name, count in counts.items() if name and count >= 2}
 
 
 # ── Invoice helpers ───────────────────────────────────────────────────────────
@@ -956,11 +988,43 @@ def dashboard():
     cal_header = '<a href="/calendar-auth" class="btn btn-outline btn-sm" onclick="this.innerHTML=\'<span class=\\\'spinner\\\'></span> Connecting…\';this.style.pointerEvents=\'none\';">Connect Calendar</a>'
     if os.path.exists('/data/calendar_token.json'):
         try:
-            tz = pytz.timezone('America/New_York')
-            events = get_today_calendar_events()
-            cal_header = '<span class="badge badge-success">Connected</span>'
-            if events:
-                for e in events:
+            tz             = pytz.timezone('America/New_York')
+            today_events   = get_today_calendar_events()
+            upcoming       = get_upcoming_calendar_events(days=28)
+            recurring_names = _detect_recurring_names(upcoming)
+            cal_header     = '<span class="badge badge-success">Connected</span>'
+
+            # Auto-create profiles for recurring students seen today that aren't registered yet
+            auto_created = []
+            for _e in today_events:
+                _sn = clean_student_name(_e.get('summary', ''))
+                if _sn and _sn not in profiles and _sn in recurring_names:
+                    _s  = _e.get('start', {}).get('dateTime', '')
+                    _en = _e.get('end',   {}).get('dateTime', '')
+                    _dur = 60
+                    if _s and _en:
+                        try:
+                            _dur = max(15, int((
+                                datetime.fromisoformat(_en.replace('Z', '+00:00')) -
+                                datetime.fromisoformat(_s.replace('Z',  '+00:00'))
+                            ).total_seconds() / 60))
+                        except Exception:
+                            pass
+                    profiles[_sn] = {
+                        "tier_name": "Standard", "rate": 50.0,
+                        "target_minutes": _dur, "credits": 0,
+                        "description": "Auto-created from calendar event",
+                        "prepaid": 0.0,
+                    }
+                    auto_created.append(_sn)
+            if auto_created:
+                save_all_profiles(profiles)
+                for _n in auto_created:
+                    log_event("feature", detail=f"auto_create_recurring:{_n}")
+
+            today_str = datetime.now().strftime('%Y-%m-%d')
+            if today_events:
+                for e in today_events:
                     summary  = e.get('summary', 'Lesson')
                     start_dt = e.get('start', {}).get('dateTime', '')
                     end_dt   = e.get('end',   {}).get('dateTime', '')
@@ -976,27 +1040,52 @@ def dashboard():
                         except Exception:
                             pass
                     student_name  = clean_student_name(summary)
-                    is_registered = student_name in profiles
-                    quick_create_btn = ""
-                    if not is_registered and student_name:
-                        safe_name = student_name.replace('"', '&quot;')
-                        quick_create_btn = (
-                            f'<form action="/quick-create-student" method="post" style="margin-top:6px;">'
+                    is_registered = bool(student_name and student_name in profiles)
+                    safe_name     = student_name.replace('"', '&quot;') if student_name else ''
+
+                    if is_registered:
+                        action_html = (
+                            f'<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">'
+                            f'<form action="/record-attendance" method="post" style="margin:0;">'
                             f'<input type="hidden" name="student_name" value="{safe_name}">'
+                            f'<input type="hidden" name="status" value="confirmed">'
+                            f'<input type="hidden" name="event_date" value="{today_str}">'
                             f'<input type="hidden" name="duration_minutes" value="{dur}">'
-                            f'<input type="hidden" name="redirect_to" value="/dashboard">'
-                            f'<button type="submit" class="btn btn-success btn-sm">➕ Quick Create Student</button>'
+                            f'<button type="submit" class="btn btn-success btn-sm" style="padding:4px 14px;">✓ Confirm</button>'
                             f'</form>'
+                            f'<form action="/record-attendance" method="post" style="margin:0;">'
+                            f'<input type="hidden" name="student_name" value="{safe_name}">'
+                            f'<input type="hidden" name="status" value="missed">'
+                            f'<input type="hidden" name="event_date" value="{today_str}">'
+                            f'<input type="hidden" name="duration_minutes" value="{dur}">'
+                            f'<button type="submit" class="btn btn-sm" style="padding:4px 14px;background:#f59e0b;color:#fff;border:none;cursor:pointer;border-radius:6px;font-size:12px;font-weight:600;">✗ Missed</button>'
+                            f'</form>'
+                            f'</div>'
                         )
-                    reg_badge = ('' if is_registered else
-                                 '<span class="badge badge-warning" style="margin-left:6px;font-size:10px;">Not registered</span>')
+                        reg_badge = ''
+                    elif student_name:
+                        url_name    = student_name.replace(' ', '+')
+                        is_recurring = student_name in recurring_names
+                        rec_note     = ' · recurring' if is_recurring else ' · one-time'
+                        action_html  = (
+                            f'<div style="margin-top:8px;">'
+                            f'<a href="/students?new_name={url_name}" '
+                            f'style="display:inline-block;padding:4px 12px;background:#6366f1;color:#fff;'
+                            f'border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;">➕ Create Student</a>'
+                            f'</div>'
+                        )
+                        reg_badge = f'<span class="badge badge-warning" style="margin-left:6px;font-size:10px;">not registered{rec_note}</span>'
+                    else:
+                        action_html = ''
+                        reg_badge   = ''
+
                     calendar_items += (
                         f'<div style="padding:10px 0;border-bottom:1px solid var(--border);">'
                         f'<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px;">'
                         f'<span style="font-weight:600;">🎵 {summary}{reg_badge}</span>'
                         f'<span style="color:var(--muted);font-size:12px;">{t} · {dur} min</span>'
                         f'</div>'
-                        f'{quick_create_btn}'
+                        f'{action_html}'
                         f'</div>'
                     )
             else:
@@ -1552,7 +1641,7 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 @app.get("/students", response_class=HTMLResponse)
-def students_page():
+def students_page(new_name: str = Query("")):
     profiles = get_all_profiles()
     # Compute open invoice balance per student
     inv_balance: dict[str, float] = {}
@@ -1604,10 +1693,43 @@ def students_page():
 </div>"""
 
     # Calendar suggestions: unregistered students from today's events
+    # Recurring ones get auto-created; one-time ones get a "Create Student" link
     cal_suggestions_html = ""
     try:
-        cal_events = get_today_calendar_events()
-        seen, suggestions = set(), []
+        cal_events      = get_today_calendar_events()
+        upcoming        = get_upcoming_calendar_events(days=28)
+        recurring_names = _detect_recurring_names(upcoming)
+
+        # Auto-create recurring students not yet in profiles
+        auto_created_here = []
+        for _e in cal_events:
+            _sn = clean_student_name(_e.get('summary', ''))
+            if _sn and _sn not in profiles and _sn in recurring_names:
+                _s  = _e.get('start', {}).get('dateTime', '')
+                _en = _e.get('end',   {}).get('dateTime', '')
+                _dur = 60
+                if _s and _en:
+                    try:
+                        _dur = max(15, int((
+                            datetime.fromisoformat(_en.replace('Z', '+00:00')) -
+                            datetime.fromisoformat(_s.replace('Z',  '+00:00'))
+                        ).total_seconds() / 60))
+                    except Exception:
+                        pass
+                profiles[_sn] = {
+                    "tier_name": "Standard", "rate": 50.0,
+                    "target_minutes": _dur, "credits": 0,
+                    "description": "Auto-created from calendar event",
+                    "prepaid": 0.0,
+                }
+                auto_created_here.append(_sn)
+        if auto_created_here:
+            save_all_profiles(profiles)
+            for _n in auto_created_here:
+                log_event("feature", detail=f"auto_create_recurring:{_n}")
+
+        # One-time unregistered students: show create link
+        seen, one_time = set(), []
         for e in cal_events:
             summary      = e.get('summary', '')
             student_name = clean_student_name(summary)
@@ -1623,38 +1745,82 @@ def students_page():
                         dur  = max(15, int((e_dt - s_dt).total_seconds() / 60))
                     except Exception:
                         pass
-                suggestions.append({'name': student_name, 'summary': summary, 'dur': dur})
-        if suggestions:
+                one_time.append({'name': student_name, 'summary': summary, 'dur': dur})
+
+        parts = []
+        if auto_created_here:
+            parts.append(
+                f'<div class="alert alert-success" style="margin-bottom:12px;">'
+                f'✅ Auto-created {len(auto_created_here)} recurring student(s): '
+                f'{", ".join(f"<strong>{n}</strong>" for n in auto_created_here)}'
+                f'</div>'
+            )
+        if one_time:
             sug_rows = ""
-            for s in suggestions:
-                safe_name = s['name'].replace('"', '&quot;')
-                rate      = _suggested_rate(s['dur'])
-                sug_rows += f"""<tr>
-  <td><strong>{s['name']}</strong></td>
-  <td style="color:var(--muted);font-size:12px;">{s['summary']}</td>
-  <td>{s['dur']} min → ${rate:.0f}/hr</td>
-  <td>
-    <form action="/quick-create-student" method="post" style="display:inline;">
-      <input type="hidden" name="student_name" value="{safe_name}">
-      <input type="hidden" name="duration_minutes" value="{s['dur']}">
-      <input type="hidden" name="redirect_to" value="/students">
-      <button type="submit" class="btn btn-success btn-sm">➕ Quick Create</button>
-    </form>
-  </td>
-</tr>"""
-            cal_suggestions_html = f"""<div class="card" style="border-color:#fbbf24;background:#fffbeb;">
-  <div class="card-header">
-    <h2 style="margin:0;color:#92400e;">📅 Detected from Today's Calendar</h2>
-    <span class="badge badge-warning">{len(suggestions)} new</span>
-  </div>
-  <p style="color:var(--muted);font-size:13px;margin-bottom:12px;">These names appear in today's calendar events but aren't registered yet.</p>
-  <div style="overflow-x:auto;">
-    <table>
-      <thead><tr><th>Detected Name</th><th>Event Title</th><th>Suggested Rate</th><th></th></tr></thead>
-      <tbody>{sug_rows}</tbody>
-    </table>
-  </div>
-</div>"""
+            for s in one_time:
+                url_name = s['name'].replace(' ', '+')
+                rate     = _suggested_rate(s['dur'])
+                sug_rows += (
+                    f"<tr>"
+                    f"<td><strong>{s['name']}</strong></td>"
+                    f"<td style='color:var(--muted);font-size:12px;'>{s['summary']}</td>"
+                    f"<td>{s['dur']} min → ${rate:.0f}/hr</td>"
+                    f"<td><a href='/students?new_name={url_name}' "
+                    f"style='display:inline-block;padding:4px 12px;background:#6366f1;color:#fff;"
+                    f"border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;'>➕ Create Student</a></td>"
+                    f"</tr>"
+                )
+            parts.append(
+                f'<div style="overflow-x:auto;">'
+                f'<p style="color:var(--muted);font-size:13px;margin-bottom:8px;">'
+                f'One-time events — click to pre-fill the Add Student form below.</p>'
+                f'<table>'
+                f'<thead><tr><th>Detected Name</th><th>Event Title</th><th>Suggested Rate</th><th></th></tr></thead>'
+                f'<tbody>{sug_rows}</tbody>'
+                f'</table></div>'
+            )
+        if parts:
+            cal_suggestions_html = (
+                f'<div class="card" style="border-color:#fbbf24;background:#fffbeb;">'
+                f'<div class="card-header">'
+                f'<h2 style="margin:0;color:#92400e;">📅 Calendar Detection</h2>'
+                f'<span class="badge badge-warning">{len(auto_created_here)} auto-created · {len(one_time)} one-time</span>'
+                f'</div>'
+                + "".join(parts) +
+                f'</div>'
+            )
+
+        # Duplicate detection: profiles whose name differs from clean_student_name(name)
+        dup_rows = ""
+        for pname in list(profiles.keys()):
+            cleaned = clean_student_name(pname)
+            if cleaned != pname and cleaned in profiles:
+                dup_rows += (
+                    f"<tr>"
+                    f"<td><strong>{pname}</strong></td>"
+                    f"<td style='color:#10b981;font-weight:600;'>{cleaned}</td>"
+                    f"<td><form action='/delete-student' method='post' style='display:inline;' "
+                    f"onsubmit=\"return confirm('Delete duplicate \\\"{pname}\\\"? The real student \\\"{cleaned}\\\" is kept.')\"> "
+                    f"<input type='hidden' name='student_name' value='{pname}'>"
+                    f"<button type='submit' class='btn btn-sm' style='background:#ef4444;color:#fff;border:none;cursor:pointer;"
+                    f"border-radius:6px;padding:3px 10px;font-size:12px;'>Delete Duplicate</button>"
+                    f"</form></td>"
+                    f"</tr>"
+                )
+        if dup_rows:
+            cal_suggestions_html += (
+                f'<div class="card" style="border-color:#ef4444;background:#fff5f5;margin-top:16px;">'
+                f'<div class="card-header">'
+                f'<h2 style="margin:0;color:#b91c1c;">🔁 Potential Duplicates</h2>'
+                f'</div>'
+                f'<p style="color:var(--muted);font-size:13px;margin-bottom:12px;">'
+                f'These profiles have un-cleaned names. The cleaned version already exists as a separate student.</p>'
+                f'<table>'
+                f'<thead><tr><th>Duplicate Name</th><th>Real Student</th><th></th></tr></thead>'
+                f'<tbody>{dup_rows}</tbody>'
+                f'</table>'
+                f'</div>'
+            )
     except Exception:
         cal_suggestions_html = ""
 
@@ -1672,7 +1838,7 @@ def students_page():
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
       <div class="form-group" style="margin:0;">
         <label class="form-label">Student Name</label>
-        <input type="text" name="name" placeholder="Full name" required>
+        <input type="text" name="name" placeholder="Full name" required value="{new_name}">
       </div>
       <div class="form-group" style="margin:0;">
         <label class="form-label">Pricing Tier</label>
@@ -1735,6 +1901,30 @@ def quick_create_student(
         url=f"{safe_redirect}?toast={toast}+added&toast_type=success",
         status_code=303,
     )
+
+
+@app.post("/record-attendance")
+def record_attendance(
+    student_name:     str = Form(...),
+    status:           str = Form(...),
+    event_date:       str = Form(...),
+    duration_minutes: int = Form(60),
+):
+    if status not in ("confirmed", "missed", "cancelled"):
+        return RedirectResponse(url="/dashboard", status_code=303)
+    labels = {
+        "confirmed":  "Lesson Confirmed",
+        "missed":     "Lesson Missed",
+        "cancelled":  "Lesson Cancelled",
+    }
+    with open(LEDGER_FILE, 'a', newline='') as f:
+        csv.writer(f).writerow([
+            event_date, student_name, labels[status], "0.00",
+            f"{duration_minutes} min - {status}",
+        ])
+    log_event("feature", detail=f"attendance:{status}")
+    toast = f"{student_name.replace(' ', '+')}+marked+as+{status}"
+    return RedirectResponse(url=f"/dashboard?toast={toast}", status_code=303)
 
 
 @app.get("/rates", response_class=HTMLResponse)
