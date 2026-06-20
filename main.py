@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Form, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 import os
 import csv
 from datetime import datetime, timedelta
@@ -142,6 +143,14 @@ def _fetch_stripe_data(sub: dict) -> dict:
     return result
 
 app = FastAPI(title="Studio App")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Create static directory
 os.makedirs("static", exist_ok=True)
@@ -1804,6 +1813,14 @@ async def auth_middleware(request: Request, call_next):
 
     if (path in _PUBLIC_PATHS or path.startswith("/static/")
             or path.startswith("/confirm/") or path.startswith("/reset-password/")):
+        return await call_next(request)
+
+    # Mobile API — return JSON errors instead of HTML redirects
+    if path.startswith("/api/mobile/"):
+        if path == "/api/mobile/login":
+            return await call_next(request)
+        if request.cookies.get("session") != "authenticated":
+            return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
         return await call_next(request)
 
     # Parent portal — separate auth via parent_session cookie
@@ -3940,6 +3957,97 @@ def backup_csv():
     buf.seek(0)
     return Response(content=buf.getvalue(), media_type="application/zip",
                     headers={"Content-Disposition": "attachment; filename=studio_backup.zip"})
+
+
+# ─── Mobile API ────────────────────────────────────────────────────────────────
+
+@app.post("/api/mobile/login")
+async def mobile_login(request: Request):
+    data = await request.json()
+    email    = data.get("email", "").strip().lower()
+    password = data.get("password", "")
+    pw_hash  = hashlib.sha256(password.encode()).hexdigest()
+    for user in get_all_users():
+        if user.get("email", "").lower() == email and user.get("password_hash") == pw_hash:
+            if user.get("role", "admin") != "admin":
+                return JSONResponse({"ok": False, "error": "Not a teacher account"}, status_code=403)
+            log_event("login", user=email)
+            return JSONResponse({"ok": True, "name": user.get("name", ""), "session": "authenticated"})
+    return JSONResponse({"ok": False, "error": "Invalid email or password"}, status_code=401)
+
+
+@app.get("/api/mobile/lessons/today")
+def mobile_today_lessons():
+    events = get_today_calendar_events()
+    profiles = get_all_profiles()
+    result = []
+    for e in events:
+        summary  = e.get("summary", "")
+        name     = clean_student_name(summary)
+        start    = e.get("start", {})
+        dt_str   = start.get("dateTime", start.get("date", ""))
+        profile  = profiles.get(name, {})
+        result.append({
+            "summary":          summary,
+            "student_name":     name,
+            "start":            dt_str,
+            "duration_minutes": e.get("duration_minutes", 60),
+            "is_registered":    name in profiles,
+            "prepaid_balance":  float(profile.get("prepaid", 0)) if profile else 0,
+            "rate":             float(profile.get("rate", 0)) if profile else 0,
+        })
+    return JSONResponse({"ok": True, "lessons": result, "date": datetime.now().strftime("%Y-%m-%d")})
+
+
+@app.get("/api/mobile/students")
+def mobile_students():
+    profiles = get_all_profiles()
+    result = []
+    for name, p in profiles.items():
+        result.append({
+            "name":            name,
+            "tier":            p.get("tier_name", ""),
+            "rate":            float(p.get("rate", 0)),
+            "prepaid_balance": float(p.get("prepaid", 0)),
+            "target_minutes":  int(p.get("target_minutes", 0)),
+        })
+    result.sort(key=lambda x: x["name"].lower())
+    return JSONResponse({"ok": True, "students": result})
+
+
+@app.post("/api/mobile/record-attendance")
+async def mobile_record_attendance(request: Request):
+    data           = await request.json()
+    student_name   = data.get("student_name", "").strip()
+    status         = data.get("status", "").lower()
+    event_date     = data.get("event_date", datetime.now().strftime("%Y-%m-%d"))
+    duration_mins  = int(data.get("duration_minutes", 60))
+
+    if not student_name or status not in ("confirmed", "missed", "cancelled"):
+        return JSONResponse({"ok": False, "error": "Invalid parameters"}, status_code=400)
+
+    profiles = get_all_profiles()
+    if student_name not in profiles:
+        return JSONResponse({"ok": False, "error": "Student not found"}, status_code=404)
+
+    profile = profiles[student_name]
+    hourly  = float(profile.get("rate", 50))
+    charge  = round(hourly * duration_mins / 60, 2) if status in ("confirmed", "missed") else 0.0
+
+    if charge:
+        profile["prepaid"] = round(float(profile.get("prepaid", 0)) - charge, 2)
+        save_all_profiles(profiles)
+
+    if os.path.exists(LEDGER_FILE):
+        with open(LEDGER_FILE, 'a', newline='') as f:
+            csv.writer(f).writerow([
+                event_date, student_name, status, f"{-charge:.2f}" if charge else "0.00",
+                f"Mobile — {status} ({duration_mins} min)",
+            ])
+
+    log_event("attendance", user=student_name, detail=status)
+    return JSONResponse({"ok": True, "status": status, "charge": charge,
+                         "new_balance": float(profile.get("prepaid", 0))})
 
 
 # ─── Beta Analytics ────────────────────────────────────────────────────────────
