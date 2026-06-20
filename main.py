@@ -262,6 +262,7 @@ def page(title: str, content: str, active: str = "dashboard") -> str:
         ("schedule",  "/schedule",   "📅", "Schedule"),
         ("invoices",  "/invoices",   "🧾", "Invoices"),
         ("analytics", "/analytics",  "📈", "Analytics"),
+        ("beta-stats", "/beta-analytics", "🧪", "Beta Stats"),
         ("settings",  "/settings",   "⚙️",  "Settings"),
         ("admin",     "/admin",      "🔐", "Admin"),
         ("billing",   "/billing",    "💳", "Billing"),
@@ -352,6 +353,88 @@ document.addEventListener('keydown', function(e){{
     showToast('Shortcuts: C = Confirm lesson · M = Mark missed · S = Schedule','info');
   }}
 }});
+<!-- Feedback widget (beta testers) -->
+<style>
+#fb-btn{{position:fixed;bottom:24px;right:24px;z-index:8000;background:linear-gradient(135deg,var(--primary),var(--secondary));color:#fff;border:none;border-radius:50px;padding:10px 18px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 4px 16px rgba(99,102,241,.35);display:flex;align-items:center;gap:6px;transition:transform .2s,box-shadow .2s;}}
+#fb-btn:hover{{transform:translateY(-2px);box-shadow:0 6px 20px rgba(99,102,241,.5);}}
+#fb-panel{{position:fixed;bottom:72px;right:24px;z-index:8000;width:310px;background:#fff;border-radius:16px;box-shadow:0 8px 40px rgba(0,0,0,.16);padding:22px;border:1px solid var(--border);display:none;animation:fbIn .18s ease;}}
+@keyframes fbIn{{from{{opacity:0;transform:translateY(10px);}}to{{opacity:1;transform:translateY(0);}}}}
+#fb-close{{position:absolute;top:10px;right:12px;background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted);line-height:1;padding:2px 6px;border-radius:4px;}}
+#fb-close:hover{{background:var(--bg);}}
+#fb-panel h3{{font-size:14px;font-weight:700;margin:0 0 16px;color:var(--dark);}}
+.fb-field{{margin-bottom:12px;}}
+.fb-lbl{{display:block;font-size:11px;font-weight:600;color:var(--dark);margin-bottom:4px;text-transform:uppercase;letter-spacing:.4px;}}
+#fb-trying,#fb-happened{{width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit;outline:none;box-sizing:border-box;}}
+#fb-happened{{resize:vertical;min-height:60px;}}
+#fb-trying:focus,#fb-happened:focus{{border-color:var(--primary);box-shadow:0 0 0 3px rgba(99,102,241,.1);}}
+.star-row{{display:flex;gap:4px;margin-top:4px;}}
+.star-btn{{background:none;border:none;font-size:24px;cursor:pointer;color:#d1d5db;padding:0;line-height:1;transition:color .1s;}}
+.star-btn.on,.star-btn:hover~.star-btn{{color:#f59e0b;}}
+#fb-submit{{width:100%;padding:10px;margin-top:14px;background:linear-gradient(135deg,var(--primary),var(--secondary));color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:opacity .15s;}}
+#fb-submit:disabled{{opacity:.55;cursor:default;}}
+</style>
+<button id="fb-btn" onclick="fbToggle()">💬 Feedback</button>
+<div id="fb-panel">
+  <button id="fb-close" onclick="fbToggle()" title="Close">×</button>
+  <h3>Share Feedback</h3>
+  <div class="fb-field">
+    <label class="fb-lbl" for="fb-trying">What were you trying to do?</label>
+    <input type="text" id="fb-trying" placeholder="e.g. Generate invoices for July">
+  </div>
+  <div class="fb-field">
+    <label class="fb-lbl" for="fb-happened">What happened?</label>
+    <textarea id="fb-happened" placeholder="e.g. Button didn't respond"></textarea>
+  </div>
+  <div class="fb-field">
+    <label class="fb-lbl">Rate your experience</label>
+    <div class="star-row" id="fbStars">
+      <button class="star-btn" data-v="1" onclick="fbStar(1)">★</button>
+      <button class="star-btn" data-v="2" onclick="fbStar(2)">★</button>
+      <button class="star-btn" data-v="3" onclick="fbStar(3)">★</button>
+      <button class="star-btn" data-v="4" onclick="fbStar(4)">★</button>
+      <button class="star-btn" data-v="5" onclick="fbStar(5)">★</button>
+    </div>
+  </div>
+  <button id="fb-submit" onclick="fbSend()">Send Feedback</button>
+</div>
+<script>
+var _fbR = 0;
+function fbToggle(){{
+  var p = document.getElementById('fb-panel');
+  p.style.display = p.style.display === 'block' ? 'none' : 'block';
+  if(p.style.display === 'block') document.getElementById('fb-trying').focus();
+}}
+function fbStar(v){{
+  _fbR = v;
+  document.querySelectorAll('.star-btn').forEach(function(b){{
+    b.classList.toggle('on', +b.dataset.v <= v);
+  }});
+}}
+function fbSend(){{
+  var t = document.getElementById('fb-trying').value.trim();
+  var h = document.getElementById('fb-happened').value.trim();
+  if(!t || !h){{ showToast('Please fill in both fields.','error'); return; }}
+  if(!_fbR){{ showToast('Please choose a star rating.','error'); return; }}
+  var btn = document.getElementById('fb-submit');
+  btn.disabled = true; btn.textContent = 'Sending…';
+  var fd = new FormData();
+  fd.append('trying_to', t); fd.append('what_happened', h); fd.append('rating', _fbR);
+  fetch('/feedback', {{method:'POST', body:fd}})
+    .then(function(r){{ return r.json(); }})
+    .then(function(){{
+      document.getElementById('fb-panel').style.display = 'none';
+      document.getElementById('fb-trying').value = '';
+      document.getElementById('fb-happened').value = '';
+      _fbR = 0;
+      document.querySelectorAll('.star-btn').forEach(function(b){{ b.classList.remove('on'); }});
+      btn.disabled = false; btn.textContent = 'Send Feedback';
+      showToast('Thanks for your feedback! 🙏','success');
+    }})
+    .catch(function(){{
+      btn.disabled = false; btn.textContent = 'Send Feedback';
+      showToast('Could not send — please try again.','error');
+    }});
+}}
 </script>
 </body>
 </html>"""
@@ -365,12 +448,12 @@ if not os.path.exists(PASSWORD_FILE):
         json.dump({"password_hash": default_hash}, f)
 
 # Users file
-USERS_FILE    = "data/users.csv"
+USERS_FILE    = "/data/users.csv"
 USERS_HEADERS = [
     "name", "email", "password_hash", "is_beta_tester", "created_at",
     "is_verified", "verification_token", "reset_token", "reset_token_expires",
 ]
-os.makedirs("data", exist_ok=True)
+os.makedirs("/data", exist_ok=True)
 
 
 def _init_users_csv():
@@ -463,10 +546,29 @@ def save_user(name: str, email: str, password_hash: str, verification_token: str
             "reset_token_expires": "",
         })
 
+# ── Analytics events ──────────────────────────────────────────────────────────
+ANALYTICS_FILE    = "/data/analytics_events.csv"
+ANALYTICS_HEADERS = ["timestamp", "event_type", "user", "path", "detail"]
+
+if not os.path.exists(ANALYTICS_FILE):
+    with open(ANALYTICS_FILE, 'w', newline='') as _f:
+        csv.DictWriter(_f, fieldnames=ANALYTICS_HEADERS).writeheader()
+
+
+def log_event(event_type: str, user: str = "", path: str = "", detail: str = ""):
+    try:
+        with open(ANALYTICS_FILE, 'a', newline='') as f:
+            csv.writer(f).writerow([
+                datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                event_type, user, path, detail,
+            ])
+    except Exception:
+        pass
+
 # Data files
-PROFILES_FILE = "student_profiles.csv"
-PRICING_FILE  = "pricing_tiers.csv"
-LEDGER_FILE   = "ledger.csv"
+PROFILES_FILE = "/data/student_profiles.csv"
+PRICING_FILE  = "/data/pricing_tiers.csv"
+LEDGER_FILE   = "/data/ledger.csv"
 DEFAULT_RATE  = 50.00
 
 def get_all_profiles():
@@ -592,10 +694,10 @@ def _suggested_rate(duration_minutes: int) -> float:
 
 
 def get_today_calendar_events():
-    if not os.path.exists('calendar_token.json'):
+    if not os.path.exists('/data/calendar_token.json'):
         return []
     try:
-        with open('calendar_token.json', 'r') as f:
+        with open('/data/calendar_token.json', 'r') as f:
             token_data = json.load(f)
         creds = Credentials.from_authorized_user_info(token_data)
         service = build('calendar', 'v3', credentials=creds)
@@ -615,7 +717,7 @@ def get_today_calendar_events():
 
 
 # ── Invoice helpers ───────────────────────────────────────────────────────────
-INVOICES_FILE   = "invoices.csv"
+INVOICES_FILE   = "/data/invoices.csv"
 INVOICE_HEADERS = [
     "id", "student_name", "month", "year", "scheduled_lessons",
     "total_amount", "amount_paid", "balance_due", "status",
@@ -673,11 +775,11 @@ def save_all_invoices(invoices: list[dict]):
 
 def get_calendar_events_for_month(year: int, month: int) -> list:
     """Fetch all calendar events for the given month. Returns [] if not connected."""
-    if not os.path.exists('calendar_token.json'):
+    if not os.path.exists('/data/calendar_token.json'):
         return []
     try:
         import calendar as _cal
-        with open('calendar_token.json', 'r') as f:
+        with open('/data/calendar_token.json', 'r') as f:
             token_data = json.load(f)
         creds    = Credentials.from_authorized_user_info(token_data)
         service  = build('calendar', 'v3', credentials=creds)
@@ -712,7 +814,7 @@ def _display_status(inv: dict) -> str:
 def generate_invoices_for_month(year: int, month: int) -> tuple[int, str]:
     """Generate draft invoices from Google Calendar scheduled events.
     Returns (count_added, error_message)."""
-    if not os.path.exists('calendar_token.json'):
+    if not os.path.exists('/data/calendar_token.json'):
         return 0, "Google Calendar is not connected — connect it in Settings first."
     profiles = get_all_profiles()
     invoices = get_all_invoices()
@@ -852,7 +954,7 @@ def dashboard():
     profiles = get_all_profiles()
     calendar_items = ""
     cal_header = '<a href="/calendar-auth" class="btn btn-outline btn-sm" onclick="this.innerHTML=\'<span class=\\\'spinner\\\'></span> Connecting…\';this.style.pointerEvents=\'none\';">Connect Calendar</a>'
-    if os.path.exists('calendar_token.json'):
+    if os.path.exists('/data/calendar_token.json'):
         try:
             tz = pytz.timezone('America/New_York')
             events = get_today_calendar_events()
@@ -970,6 +1072,8 @@ def login_page(error: str = "", info: str = ""):
     </form>
     <p style="text-align:center;margin-top:14px;font-size:13px;">
       <a href="/forgot-password" style="color:var(--muted);">Forgot password?</a>
+      &nbsp;·&nbsp;
+      <a href="/resend-confirmation" style="color:var(--muted);">Resend confirmation email</a>
     </p>
     <p style="text-align:center;margin-top:8px;font-size:13px;color:var(--muted);">
       Don't have an account? <a href="/signup" style="color:var(--primary);font-weight:600;">Sign up here</a>
@@ -1008,6 +1112,102 @@ def logout():
     response = RedirectResponse(url="/login", status_code=303)
     response.delete_cookie("session")
     return response
+
+
+@app.post("/feedback")
+def submit_feedback(
+    trying_to:    str = Form(...),
+    what_happened: str = Form(...),
+    rating:       str = Form(...),
+):
+    stars = "⭐" * max(1, min(5, int(rating)))
+    log_event("feature", detail=f"feedback:{rating}stars")
+    send_email(
+        to="robertcollech@gmail.com",
+        subject=f"Studio Feedback — {stars}",
+        body_html=(
+            f"<h2 style='color:#6366f1;margin-bottom:4px;'>Studio Console Feedback</h2>"
+            f"<p style='color:#64748b;font-size:13px;margin-top:0;'>Rating: {stars} ({rating}/5)</p>"
+            f"<hr style='border:none;border-top:1px solid #e2e8f0;margin:16px 0;'>"
+            f"<p><strong>What were you trying to do?</strong></p>"
+            f"<p style='background:#f8fafc;padding:12px;border-radius:8px;'>{trying_to}</p>"
+            f"<p><strong>What happened?</strong></p>"
+            f"<p style='background:#f8fafc;padding:12px;border-radius:8px;'>{what_happened}</p>"
+        ),
+    )
+    return {"ok": True}
+
+
+@app.get("/resend-confirmation", response_class=HTMLResponse)
+def resend_confirmation_page(info: str = "", error: str = ""):
+    info_html  = f'<div class="alert alert-success">{info}</div>'  if info  else ''
+    error_html = f'<div class="alert alert-danger">{error}</div>'  if error else ''
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Resend Confirmation — Studio Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="login-logo">🎵</div>
+    <h1 style="text-align:center;margin-bottom:4px;">Resend Confirmation</h1>
+    <p style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:22px;">
+      Enter your email and we'll send a new confirmation link.</p>
+    {info_html}{error_html}
+    <form action="/resend-confirmation" method="post">
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input type="email" name="email" placeholder="you@example.com" required autofocus>
+      </div>
+      <button type="submit" class="btn" style="width:100%;justify-content:center;padding:10px;">
+        Send Confirmation Email</button>
+    </form>
+    <p style="text-align:center;margin-top:18px;font-size:13px;color:var(--muted);">
+      <a href="/login" style="color:var(--primary);font-weight:600;">Back to sign in</a>
+    </p>
+  </div>
+</div>
+</body>
+</html>""")
+
+
+@app.post("/resend-confirmation")
+def resend_confirmation_post(request: Request, email: str = Form(...)):
+    email = email.strip().lower()
+    for user in get_all_users():
+        if user.get("email") == email:
+            if user.get("is_verified", "true") == "true":
+                return RedirectResponse(
+                    url="/resend-confirmation?info=This+account+is+already+verified.+You+can+sign+in.",
+                    status_code=303,
+                )
+            token = secrets.token_urlsafe(32)
+            update_user(email, verification_token=token)
+            base_url    = str(request.base_url).rstrip('/')
+            confirm_url = f"{base_url}/confirm/{token}"
+            send_email(
+                to=email,
+                subject="Confirm your Studio Console account",
+                body_html=(
+                    f"<p>Hi {user.get('name', '')}!</p>"
+                    f"<p>Click the link below to verify your email address:</p>"
+                    f"<p><a href='{confirm_url}' style='color:#6366f1;font-weight:600;'>"
+                    f"Confirm my email</a></p>"
+                    f"<p style='color:#64748b;font-size:12px;'>Or paste: {confirm_url}</p>"
+                ),
+            )
+            break
+    # Always show the same message to avoid email enumeration
+    return RedirectResponse(
+        url="/resend-confirmation?info=If+that+email+is+registered+and+unverified%2C"
+            "+a+new+confirmation+link+has+been+sent.",
+        status_code=303,
+    )
 
 
 @app.get("/signup", response_class=HTMLResponse)
@@ -1111,6 +1311,7 @@ def signup_post(
     pw_hash = hashlib.sha256(password.encode()).hexdigest()
     token   = secrets.token_urlsafe(32)
     save_user(name.strip(), email, pw_hash, verification_token=token)
+    log_event("signup", user=email, detail="beta_tester")
     base_url = str(request.base_url).rstrip('/')
     confirm_url = f"{base_url}/confirm/{token}"
     send_email(
@@ -1316,7 +1517,8 @@ def root():
 
 # Auth middleware
 _PUBLIC_PATHS    = frozenset([
-    "/login", "/logout", "/", "/test", "/signup", "/forgot-password",
+    "/login", "/logout", "/", "/test", "/signup",
+    "/forgot-password", "/resend-confirmation",
 ])
 _BILLING_PATHS   = frozenset(["/billing", "/create-checkout-session",
                                "/billing/portal", "/billing/cancel"])
@@ -1341,10 +1543,12 @@ async def auth_middleware(request: Request, call_next):
     if path in _BILLING_PATHS:
         return await call_next(request)
 
-    # Access control wall for protected pages:
-    #   - Admin (session="authenticated" in this single-admin app) → always through
-    #   - Future multi-user: check sub.get('subscription_status') == 'active'
-    #     or is_beta_tester field before calling call_next
+    # Log page views for GET requests (not API/static calls)
+    if (request.method == "GET"
+            and not path.startswith("/api/")
+            and not path.startswith("/static/")):
+        log_event("page_view", path=path)
+
     return await call_next(request)
 
 @app.get("/students", response_class=HTMLResponse)
@@ -1490,6 +1694,7 @@ def add_profile(name: str = Form(...), rate_tier_name: str = Form(...), descript
     profiles = get_all_profiles()
     profiles[name] = {"tier_name": rate_tier_name, "rate": DEFAULT_RATE, "target_minutes": 60, "credits": 0, "description": description}
     save_all_profiles(profiles)
+    log_event("feature", detail="add_student")
     return RedirectResponse(url=f"/students?toast=Student+{name}+added", status_code=303)
 
 
@@ -1523,6 +1728,7 @@ def quick_create_student(
             "prepaid": 0.0,
         }
         save_all_profiles(profiles)
+    log_event("feature", detail="quick_create_student")
     safe_redirect = redirect_to if redirect_to in ("/dashboard", "/students") else "/dashboard"
     toast = name.replace(' ', '+')
     return RedirectResponse(
@@ -1662,17 +1868,17 @@ def calendar_callback(code: str = None):
     flow.fetch_token(code=code)
     
     token_data = flow.credentials.to_json()
-    with open('calendar_token.json', 'w') as f:
+    with open('/data/calendar_token.json', 'w') as f:
         f.write(token_data)
     
     return HTMLResponse("<h2>✅ Calendar Connected!</h2><a href='/dashboard'>Back</a>")
 
 @app.get("/calendar-events")
 def calendar_events():
-    if not os.path.exists('calendar_token.json'):
+    if not os.path.exists('/data/calendar_token.json'):
         return HTMLResponse("<h2>Calendar not connected. <a href='/calendar-auth'>Connect here</a></h2>")
     
-    with open('calendar_token.json', 'r') as f:
+    with open('/data/calendar_token.json', 'r') as f:
         token_data = json.load(f)
     
     creds = Credentials.from_authorized_user_info(token_data)
@@ -1863,6 +2069,7 @@ def record_payment(
     with open(LEDGER_FILE, 'a', newline='') as f:
         writer = csv.writer(f)
         writer.writerow([payment_date, student_name, "Payment", f"{amount:.2f}", full_notes])
+    log_event("feature", detail=f"record_payment:{amount:.2f}")
     return RedirectResponse(url=f"/payments?toast=Payment+of+%24{amount:.2f}+recorded+for+{student_name.replace(' ', '+')}", status_code=303)
 @app.get("/test")
 def test():
@@ -2453,6 +2660,8 @@ def invoices_page():
 def generate_invoices_post(month: int = Form(...), year: int = Form(...)):
     count, err = generate_invoices_for_month(year, month)
     period     = f"{MONTH_NAMES[month]} {year}"
+    if not err and count > 0:
+        log_event("feature", detail=f"generate_invoices:{count}:{period}")
     if err:
         msg = f'<div class="alert alert-danger">❌ {err}</div>'
     elif count > 0:
@@ -2577,6 +2786,8 @@ def mark_invoice_paid(invoice_id: str):
             csv.writer(lf).writerow([
                 datetime.now().strftime('%Y-%m-%d'), stu, 'Invoice Payment', f"{amt:.2f}", note,
             ])
+    if target:
+        log_event("feature", detail=f"mark_invoice_paid:{target.get('student_name','')}:{target.get('total_amount','')}")
     return RedirectResponse(url=f"/invoices/{invoice_id}?toast=Invoice+marked+as+paid", status_code=303)
 
 
@@ -2691,4 +2902,174 @@ def backup_csv():
     buf.seek(0)
     return Response(content=buf.getvalue(), media_type="application/zip",
                     headers={"Content-Disposition": "attachment; filename=studio_backup.zip"})
+
+
+# ─── Beta Analytics ────────────────────────────────────────────────────────────
+
+@app.get("/beta-analytics", response_class=HTMLResponse)
+def beta_analytics_page():
+    from collections import Counter
+
+    # Load events
+    events = []
+    if os.path.exists(ANALYTICS_FILE):
+        with open(ANALYTICS_FILE, 'r', newline='') as f:
+            for row in csv.DictReader(f):
+                events.append(row)
+
+    # Last-30-day window
+    cutoff = datetime.now() - timedelta(days=30)
+    recent = []
+    for e in events:
+        try:
+            if datetime.strptime(e.get('timestamp', ''), '%Y-%m-%d %H:%M:%S') >= cutoff:
+                recent.append(e)
+        except ValueError:
+            pass
+
+    # Signups (all-time)
+    signup_events = [e for e in events if e.get('event_type') == 'signup']
+
+    # Beta testers from users.csv
+    users        = get_all_users()
+    beta_testers = [u for u in users if u.get('is_beta_tester') == 'true']
+
+    # Page views (last 30d) — show real page paths only
+    _PAGE_PATHS = {"/dashboard", "/students", "/rates", "/payments", "/schedule",
+                   "/invoices", "/analytics", "/beta-analytics", "/settings", "/admin", "/billing"}
+    page_views  = Counter(
+        e['path'] for e in recent
+        if e.get('event_type') == 'page_view' and e.get('path', '') in _PAGE_PATHS
+    )
+
+    # Feature events (last 30d)
+    _FEATURE_LABELS = {
+        "add_student":        "Add Student",
+        "quick_create_student": "Quick-Create Student",
+        "record_payment":     "Record Payment",
+        "feedback":           "Submit Feedback",
+        "generate_invoices":  "Generate Invoices",
+        "mark_invoice_paid":  "Mark Invoice Paid",
+    }
+    feature_raw = Counter()
+    for e in recent:
+        if e.get('event_type') == 'feature':
+            key = e.get('detail', '').split(':')[0]
+            feature_raw[key] += 1
+
+    # KPI cards
+    total_testers    = len(beta_testers)
+    signups_30d      = sum(1 for e in recent if e.get('event_type') == 'signup')
+    page_views_30d   = sum(1 for e in recent if e.get('event_type') == 'page_view' and e.get('path','') in _PAGE_PATHS)
+    feature_events_30d = sum(feature_raw.values())
+
+    kpis = f"""
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:28px;">
+  <div class="card" style="text-align:center;padding:20px 12px;">
+    <div style="font-size:2rem;font-weight:700;color:#6366f1;">{total_testers}</div>
+    <div style="color:#64748b;font-size:13px;margin-top:4px;">Total Beta Testers</div>
+  </div>
+  <div class="card" style="text-align:center;padding:20px 12px;">
+    <div style="font-size:2rem;font-weight:700;color:#10b981;">{signups_30d}</div>
+    <div style="color:#64748b;font-size:13px;margin-top:4px;">Signups (30d)</div>
+  </div>
+  <div class="card" style="text-align:center;padding:20px 12px;">
+    <div style="font-size:2rem;font-weight:700;color:#f59e0b;">{page_views_30d}</div>
+    <div style="color:#64748b;font-size:13px;margin-top:4px;">Page Views (30d)</div>
+  </div>
+  <div class="card" style="text-align:center;padding:20px 12px;">
+    <div style="font-size:2rem;font-weight:700;color:#8b5cf6;">{feature_events_30d}</div>
+    <div style="color:#64748b;font-size:13px;margin-top:4px;">Feature Events (30d)</div>
+  </div>
+</div>"""
+
+    # Beta tester list
+    tester_rows = ""
+    for u in sorted(beta_testers, key=lambda x: x.get('created_at', ''), reverse=True):
+        verified_badge = '<span style="color:#10b981;font-size:11px;">✓ verified</span>' if u.get('is_verified') == 'true' else '<span style="color:#f59e0b;font-size:11px;">⏳ pending</span>'
+        tester_rows += (
+            f"<tr>"
+            f"<td>{u.get('name','')}</td>"
+            f"<td style='color:#64748b;'>{u.get('email','')}</td>"
+            f"<td>{verified_badge}</td>"
+            f"<td style='color:#94a3b8;font-size:12px;'>{u.get('created_at','')[:10]}</td>"
+            f"</tr>"
+        )
+    if not tester_rows:
+        tester_rows = '<tr><td colspan="4" style="color:#94a3b8;text-align:center;">No beta testers yet</td></tr>'
+
+    # Top pages table
+    page_rows = ""
+    for path, count in page_views.most_common(10):
+        bar_w = int(count / max(page_views.values()) * 120) if page_views else 0
+        page_rows += (
+            f"<tr>"
+            f"<td style='font-family:monospace;'>{path}</td>"
+            f"<td><div style='display:flex;align-items:center;gap:8px;'>"
+            f"<div style='height:8px;width:{bar_w}px;background:#6366f1;border-radius:4px;'></div>"
+            f"<span style='font-weight:600;'>{count}</span></div></td>"
+            f"</tr>"
+        )
+    if not page_rows:
+        page_rows = '<tr><td colspan="2" style="color:#94a3b8;text-align:center;">No page views logged yet</td></tr>'
+
+    # Feature usage table
+    feature_rows = ""
+    for key, count in feature_raw.most_common():
+        label   = _FEATURE_LABELS.get(key, key)
+        bar_w   = int(count / max(feature_raw.values()) * 120) if feature_raw else 0
+        feature_rows += (
+            f"<tr>"
+            f"<td>{label}</td>"
+            f"<td><div style='display:flex;align-items:center;gap:8px;'>"
+            f"<div style='height:8px;width:{bar_w}px;background:#8b5cf6;border-radius:4px;'></div>"
+            f"<span style='font-weight:600;'>{count}</span></div></td>"
+            f"</tr>"
+        )
+    if not feature_rows:
+        feature_rows = '<tr><td colspan="2" style="color:#94a3b8;text-align:center;">No feature events logged yet</td></tr>'
+
+    content = f"""
+<h2 style="margin-bottom:6px;">🧪 Beta Analytics</h2>
+<p style="color:#64748b;margin-bottom:24px;">Usage stats for beta testers — page views and feature events update in real-time.</p>
+
+{kpis}
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px;">
+  <div class="card">
+    <h3 style="margin-bottom:14px;">Beta Testers</h3>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr>
+        <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e2e8f0;">Name</th>
+        <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e2e8f0;">Email</th>
+        <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e2e8f0;">Status</th>
+        <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e2e8f0;">Joined</th>
+      </tr></thead>
+      <tbody>{tester_rows}</tbody>
+    </table>
+  </div>
+  <div class="card">
+    <h3 style="margin-bottom:14px;">Top Pages (last 30d)</h3>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr>
+        <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e2e8f0;">Page</th>
+        <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e2e8f0;">Views</th>
+      </tr></thead>
+      <tbody>{page_rows}</tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card" style="max-width:480px;">
+  <h3 style="margin-bottom:14px;">Feature Usage (last 30d)</h3>
+  <table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <thead><tr>
+      <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e2e8f0;">Feature</th>
+      <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e2e8f0;">Uses</th>
+    </tr></thead>
+    <tbody>{feature_rows}</tbody>
+  </table>
+</div>"""
+
+    return HTMLResponse(page("Beta Analytics", content, "beta-stats"))
 
