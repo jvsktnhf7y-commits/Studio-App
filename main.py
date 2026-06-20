@@ -616,76 +616,137 @@ def get_today_calendar_events():
 
 # ── Invoice helpers ───────────────────────────────────────────────────────────
 INVOICES_FILE   = "invoices.csv"
-INVOICE_HEADERS = ["ID", "Student", "Month", "Year", "LessonsCount",
-                   "TotalAmount", "PaymentsApplied", "BalanceDue",
-                   "Status", "CreatedDate", "PaidDate"]
+INVOICE_HEADERS = [
+    "id", "student_name", "month", "year", "scheduled_lessons",
+    "total_amount", "amount_paid", "balance_due", "status",
+    "created_date", "paid_date",
+]
 MONTH_NAMES = ['', 'January', 'February', 'March', 'April', 'May', 'June',
                'July', 'August', 'September', 'October', 'November', 'December']
 MONTH_SHORT  = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-if not os.path.exists(INVOICES_FILE):
+# Migrate invoices.csv from old (attendance-based) field names to new schema
+def _init_invoices_csv():
+    _OLD_MAP = {
+        'ID': 'id', 'Student': 'student_name', 'Month': 'month', 'Year': 'year',
+        'LessonsCount': 'scheduled_lessons', 'TotalAmount': 'total_amount',
+        'PaymentsApplied': 'amount_paid', 'BalanceDue': 'balance_due',
+        'Status': 'status', 'CreatedDate': 'created_date', 'PaidDate': 'paid_date',
+    }
+    if not os.path.exists(INVOICES_FILE):
+        with open(INVOICES_FILE, 'w', newline='') as _f:
+            csv.DictWriter(_f, fieldnames=INVOICE_HEADERS).writeheader()
+        return
+    with open(INVOICES_FILE, 'r') as _f:
+        _r      = csv.DictReader(_f)
+        _fields = list(_r.fieldnames or [])
+        _rows   = [dict(r) for r in _r]
+    if set(INVOICE_HEADERS).issubset(set(_fields)):
+        return
     with open(INVOICES_FILE, 'w', newline='') as _f:
-        csv.DictWriter(_f, fieldnames=INVOICE_HEADERS).writeheader()
+        _w = csv.DictWriter(_f, fieldnames=INVOICE_HEADERS)
+        _w.writeheader()
+        for _row in _rows:
+            nr = {nk: _row.get(ok, _row.get(nk, '')) for ok, nk in _OLD_MAP.items()}
+            st = nr.get('status', '')
+            nr['status'] = 'paid' if st == 'Paid' else ('draft' if st in ('Unpaid', '') else st)
+            _w.writerow({k: nr.get(k, '') for k in INVOICE_HEADERS})
 
-def get_all_invoices():
-    rows = []
-    if os.path.exists(INVOICES_FILE):
-        with open(INVOICES_FILE, 'r') as f:
-            for row in csv.DictReader(f):
-                rows.append(dict(row))
-    return rows
+_init_invoices_csv()
 
-def save_all_invoices(invoices):
+
+def get_all_invoices() -> list[dict]:
+    if not os.path.exists(INVOICES_FILE):
+        return []
+    with open(INVOICES_FILE, 'r') as f:
+        return [dict(row) for row in csv.DictReader(f)]
+
+
+def save_all_invoices(invoices: list[dict]):
     with open(INVOICES_FILE, 'w', newline='') as f:
         w = csv.DictWriter(f, fieldnames=INVOICE_HEADERS)
         w.writeheader()
         for inv in invoices:
             w.writerow({k: inv.get(k, '') for k in INVOICE_HEADERS})
 
-def generate_invoices_for_month(year: int, month: int) -> int:
-    profiles  = get_all_profiles()
-    invoices  = get_all_invoices()
-    existing  = {(i['Student'], i['Year'], i['Month']) for i in invoices}
-    ledger_by = {}
-    if os.path.exists(LEDGER_FILE):
-        with open(LEDGER_FILE, 'r') as f:
-            for row in _ledger_reader(f):
-                try:
-                    d = datetime.strptime(row.get('Date', ''), '%Y-%m-%d')
-                except ValueError:
-                    continue
-                if d.year != year or d.month != month:
-                    continue
-                stu = row.get('Student', '').strip()
-                amt = _safe_float(row.get('AmountCharged', 0))
-                if stu not in ledger_by:
-                    ledger_by[stu] = {'lessons': 0, 'charged': 0.0}
-                if row.get('Status', '') in ATTENDED_STATUSES:
-                    ledger_by[stu]['lessons'] += 1
-                    ledger_by[stu]['charged']  += amt
-    next_id = max((int(i.get('ID', 0)) for i in invoices), default=0) + 1
+
+def get_calendar_events_for_month(year: int, month: int) -> list:
+    """Fetch all calendar events for the given month. Returns [] if not connected."""
+    if not os.path.exists('calendar_token.json'):
+        return []
+    try:
+        import calendar as _cal
+        with open('calendar_token.json', 'r') as f:
+            token_data = json.load(f)
+        creds    = Credentials.from_authorized_user_info(token_data)
+        service  = build('calendar', 'v3', credentials=creds)
+        tz       = pytz.timezone('America/New_York')
+        last_day = _cal.monthrange(year, month)[1]
+        t_start  = tz.localize(datetime(year, month, 1, 0, 0, 0))
+        t_end    = tz.localize(datetime(year, month, last_day, 23, 59, 59))
+        return service.events().list(
+            calendarId='primary',
+            timeMin=t_start.astimezone(pytz.UTC).isoformat(),
+            timeMax=t_end.astimezone(pytz.UTC).isoformat(),
+            singleEvents=True,
+            orderBy='startTime',
+        ).execute().get('items', [])
+    except Exception:
+        return []
+
+
+def _display_status(inv: dict) -> str:
+    """Return display status: overdue if draft/sent and the invoice month is already past."""
+    st = inv.get('status', 'draft')
+    if st in ('draft', 'sent'):
+        try:
+            now = datetime.now()
+            if (int(inv['year']), int(inv['month'])) < (now.year, now.month):
+                return 'overdue'
+        except Exception:
+            pass
+    return st
+
+
+def generate_invoices_for_month(year: int, month: int) -> tuple[int, str]:
+    """Generate draft invoices from Google Calendar scheduled events.
+    Returns (count_added, error_message)."""
+    if not os.path.exists('calendar_token.json'):
+        return 0, "Google Calendar is not connected — connect it in Settings first."
+    profiles = get_all_profiles()
+    invoices = get_all_invoices()
+    existing = {(i['student_name'], i['year'], i['month']) for i in invoices}
+    events   = get_calendar_events_for_month(year, month)
+    counts: dict[str, int] = {}
+    for e in events:
+        name = clean_student_name(e.get('summary', ''))
+        if name and name in profiles:
+            counts[name] = counts.get(name, 0) + 1
+    next_id = max((int(i.get('id') or 0) for i in invoices), default=0) + 1
     added = 0
-    for stu, data in ledger_by.items():
-        if data['lessons'] == 0:
+    for student_name, count in counts.items():
+        if (student_name, str(year), str(month)) in existing:
             continue
-        if (stu, str(year), str(month)) in existing:
-            continue
-        rate        = profiles.get(stu, {}).get('rate', DEFAULT_RATE)
-        total       = round(data['lessons'] * rate, 2)
-        applied     = round(data['charged'], 2)
-        balance     = round(max(total - applied, 0), 2)
+        rate  = profiles[student_name].get('rate', DEFAULT_RATE)
+        total = round(count * rate, 2)
         invoices.append({
-            'ID': str(next_id), 'Student': stu, 'Month': str(month), 'Year': str(year),
-            'LessonsCount': str(data['lessons']), 'TotalAmount': f"{total:.2f}",
-            'PaymentsApplied': f"{applied:.2f}", 'BalanceDue': f"{balance:.2f}",
-            'Status': 'Paid' if balance <= 0 else 'Unpaid',
-            'CreatedDate': datetime.now().strftime('%Y-%m-%d'), 'PaidDate': '',
+            'id':                str(next_id),
+            'student_name':      student_name,
+            'month':             str(month),
+            'year':              str(year),
+            'scheduled_lessons': str(count),
+            'total_amount':      f"{total:.2f}",
+            'amount_paid':       '0.00',
+            'balance_due':       f"{total:.2f}",
+            'status':            'draft',
+            'created_date':      datetime.now().strftime('%Y-%m-%d'),
+            'paid_date':         '',
         })
         next_id += 1
         added   += 1
     save_all_invoices(invoices)
-    return added
+    return added, ""
 
 
 # ── Analytics helpers ─────────────────────────────────────────────────────────
@@ -1289,10 +1350,22 @@ async def auth_middleware(request: Request, call_next):
 @app.get("/students", response_class=HTMLResponse)
 def students_page():
     profiles = get_all_profiles()
+    # Compute open invoice balance per student
+    inv_balance: dict[str, float] = {}
+    for inv in get_all_invoices():
+        if inv.get('status') != 'paid':
+            n = inv.get('student_name', '')
+            inv_balance[n] = inv_balance.get(n, 0.0) + _safe_float(inv.get('balance_due', 0))
     rows = ""
     for name, data in profiles.items():
         initials = ''.join(p[0].upper() for p in name.split()[:2])
         prepaid  = data.get('prepaid', 0)
+        owed     = inv_balance.get(name, 0.0)
+        owed_badge = (
+            f'<span class="badge badge-danger">${owed:.2f}</span>'
+            if owed > 0 else
+            '<span class="badge badge-success">$0.00</span>'
+        )
         rows += f"""<tr>
   <td><div style="display:flex;align-items:center;gap:10px;">
     <div class="student-avatar" style="width:30px;height:30px;font-size:11px;border-radius:7px;">{initials}</div>
@@ -1301,6 +1374,7 @@ def students_page():
   <td>{data.get('target_minutes',60)} min</td>
   <td>{data.get('description','') or '—'}</td>
   <td><span class="badge badge-info">${prepaid:.2f}</span></td>
+  <td>{owed_badge}</td>
   <td>
     <form action="/delete-student" method="post" style="display:inline;"
           onsubmit="return confirm('Delete {name}? This cannot be undone.')">
@@ -1313,7 +1387,7 @@ def students_page():
     if rows:
         table_html = f"""<div style="overflow-x:auto;">
   <table>
-    <thead><tr><th>Student</th><th>Rate</th><th>Lesson</th><th>Focus</th><th>Prepaid</th><th></th></tr></thead>
+    <thead><tr><th>Student</th><th>Rate</th><th>Lesson</th><th>Focus</th><th>Prepaid</th><th>Invoice Balance</th><th></th></tr></thead>
     <tbody>{rows}</tbody>
   </table>
 </div>"""
@@ -2286,61 +2360,88 @@ new Chart(document.getElementById('attChart'),{{type:'doughnut',data:{{labels:['
 
 @app.get("/invoices", response_class=HTMLResponse)
 def invoices_page():
-    invoices = sorted(get_all_invoices(),
-                      key=lambda x: (x.get('Year',''), x.get('Month','').zfill(2), x.get('Student','')),
-                      reverse=True)
-    unpaid = [i for i in invoices if i.get('Status') == 'Unpaid']
-    paid   = [i for i in invoices if i.get('Status') == 'Paid']
-    outstanding = sum(_safe_float(i.get('BalanceDue', 0)) for i in unpaid)
+    all_inv = sorted(
+        get_all_invoices(),
+        key=lambda x: (x.get('year', ''), x.get('month', '').zfill(2), x.get('student_name', '')),
+        reverse=True,
+    )
+    _ST_STYLE = {
+        'paid':     ('badge-success',  'Paid'),
+        'sent':     ('badge-info',     'Sent'),
+        'draft':    ('badge-muted',    'Draft'),
+        'overdue':  ('badge-danger',   'Overdue'),
+    }
+    paid_inv      = [i for i in all_inv if i.get('status') == 'paid']
+    open_inv      = [i for i in all_inv if i.get('status') != 'paid']
+    outstanding   = sum(_safe_float(i.get('balance_due', 0)) for i in open_inv)
+    overdue_count = sum(1 for i in all_inv if _display_status(i) == 'overdue')
 
     rows = ""
-    for inv in invoices:
-        m     = int(inv.get('Month', 1))
-        label = f"{MONTH_SHORT[m]} {inv.get('Year','')}"
-        st    = inv.get('Status', 'Unpaid')
-        badge = 'badge-success' if st == 'Paid' else 'badge-warning'
-        bal   = _safe_float(inv.get('BalanceDue', 0))
-        iid   = inv.get('ID', '')
+    for inv in all_inv:
+        iid     = inv.get('id', '')
+        m       = int(inv.get('month', 1) or 1)
+        label   = f"{MONTH_SHORT[m]} {inv.get('year', '')}"
+        dst     = _display_status(inv)
+        bcls, blbl = _ST_STYLE.get(dst, ('badge-muted', dst.title()))
+        bal     = _safe_float(inv.get('balance_due', 0))
         rows += f"""<tr>
   <td><a href="/invoices/{iid}" style="color:var(--primary);font-weight:600;">#INV-{iid.zfill(4)}</a></td>
-  <td><strong>{inv.get('Student','')}</strong></td>
+  <td><strong>{inv.get('student_name', '')}</strong></td>
   <td>{label}</td>
-  <td>${_safe_float(inv.get('TotalAmount',0)):.2f}</td>
+  <td style="text-align:center;">{inv.get('scheduled_lessons', '—')}</td>
+  <td>${_safe_float(inv.get('total_amount', 0)):.2f}</td>
+  <td style="color:var(--success);font-weight:600;">${_safe_float(inv.get('amount_paid', 0)):.2f}</td>
   <td style="font-weight:700;color:{'var(--danger)' if bal > 0 else 'var(--success)'};">${bal:.2f}</td>
-  <td><span class="badge {badge}">{st}</span></td>
+  <td><span class="badge {bcls}">{blbl}</span></td>
   <td><a href="/invoices/{iid}" class="btn btn-outline btn-sm">View</a></td>
 </tr>"""
     if not rows:
-        rows = '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted);">No invoices yet — generate below.</td></tr>'
+        rows = '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--muted);">No invoices yet — generate below.</td></tr>'
 
-    now  = datetime.now()
-    pm   = now.month - 1 if now.month > 1 else 12
-    py   = now.year   if now.month > 1 else now.year - 1
-    opts = "".join(f'<option value="{i}"{" selected" if i==pm else ""}>{MONTH_NAMES[i]}</option>' for i in range(1,13))
+    now        = datetime.now()
+    nm         = now.month + 1 if now.month < 12 else 1
+    ny         = now.year if now.month < 12 else now.year + 1
+    next_label = f"{MONTH_NAMES[nm]} {ny}"
+    cur_m      = now.month
+    cur_y      = now.year
+    opts       = "".join(
+        f'<option value="{i}"{" selected" if i == cur_m else ""}>{MONTH_NAMES[i]}</option>'
+        for i in range(1, 13)
+    )
 
     content = f"""
 <div class="stats-row">
-  <div class="stat-card"><div class="stat-icon" style="background:#e0e7ff;">🧾</div><div class="stat-val">{len(invoices)}</div><div class="stat-lbl">Total</div></div>
-  <div class="stat-card"><div class="stat-icon" style="background:#fee2e2;">⏳</div><div class="stat-val">{len(unpaid)}</div><div class="stat-lbl">Unpaid</div></div>
-  <div class="stat-card"><div class="stat-icon" style="background:#d1fae5;">✅</div><div class="stat-val">{len(paid)}</div><div class="stat-lbl">Paid</div></div>
+  <div class="stat-card"><div class="stat-icon" style="background:#e0e7ff;">🧾</div><div class="stat-val">{len(all_inv)}</div><div class="stat-lbl">Total</div></div>
+  <div class="stat-card"><div class="stat-icon" style="background:#d1fae5;">✅</div><div class="stat-val">{len(paid_inv)}</div><div class="stat-lbl">Paid</div></div>
+  <div class="stat-card"><div class="stat-icon" style="background:#fee2e2;">🔴</div><div class="stat-val">{overdue_count}</div><div class="stat-lbl">Overdue</div></div>
   <div class="stat-card"><div class="stat-icon" style="background:#fef3c7;">💰</div><div class="stat-val">${outstanding:.2f}</div><div class="stat-lbl">Outstanding</div></div>
 </div>
 <div class="card">
-  <div class="card-header"><h2 style="margin:0;">🧾 Invoices</h2></div>
+  <div class="card-header">
+    <h2 style="margin:0;">🧾 Invoices</h2>
+    <form action="/generate-invoices" method="post">
+      <input type="hidden" name="month" value="{nm}">
+      <input type="hidden" name="year"  value="{ny}">
+      <button type="submit" class="btn btn-success btn-sm">⚡ Generate {next_label}</button>
+    </form>
+  </div>
   <div style="overflow-x:auto;">
     <table>
-      <thead><tr><th>Invoice</th><th>Student</th><th>Period</th><th>Total</th><th>Balance</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Invoice</th><th>Student</th><th>Period</th><th style="text-align:center;">Lessons</th><th>Total</th><th>Paid</th><th>Balance</th><th>Status</th><th></th></tr></thead>
       <tbody>{rows}</tbody>
     </table>
   </div>
 </div>
-<div class="card" style="max-width:420px;">
-  <h2>⚡ Generate Invoices</h2>
-  <p style="color:var(--muted);font-size:13px;margin-bottom:16px;">Creates one invoice per student for all confirmed lessons in the selected month.</p>
+<div class="card" style="max-width:440px;">
+  <h2>⚡ Generate Invoices for Any Month</h2>
+  <p style="color:var(--muted);font-size:13px;margin-bottom:16px;">
+    Counts scheduled events on Google Calendar for each registered student and creates draft invoices.
+    Attendance tracking is separate and does not change invoice amounts.
+  </p>
   <form action="/generate-invoices" method="post">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
       <div class="form-group" style="margin:0;"><label class="form-label">Month</label><select name="month">{opts}</select></div>
-      <div class="form-group" style="margin:0;"><label class="form-label">Year</label><input type="number" name="year" value="{py}" min="2020" max="2035" required></div>
+      <div class="form-group" style="margin:0;"><label class="form-label">Year</label><input type="number" name="year" value="{cur_y}" min="2020" max="2035" required></div>
     </div>
     <button type="submit" class="btn" style="margin-top:14px;">⚡ Generate</button>
   </form>
@@ -2350,70 +2451,132 @@ def invoices_page():
 
 @app.post("/generate-invoices")
 def generate_invoices_post(month: int = Form(...), year: int = Form(...)):
-    count  = generate_invoices_for_month(year, month)
-    period = f"{MONTH_NAMES[month]} {year}"
-    if count > 0:
-        msg = f'<div class="alert alert-success">✅ Generated {count} invoice(s) for {period}.</div>'
+    count, err = generate_invoices_for_month(year, month)
+    period     = f"{MONTH_NAMES[month]} {year}"
+    if err:
+        msg = f'<div class="alert alert-danger">❌ {err}</div>'
+    elif count > 0:
+        msg = f'<div class="alert alert-success">✅ Generated {count} draft invoice(s) for {period} based on scheduled calendar events.</div>'
     else:
-        msg = f'<div class="alert alert-warning">ℹ️ No new invoices for {period}. Already generated or no confirmed lessons.</div>'
-    return HTMLResponse(page("Generate Invoices", msg + '<a href="/invoices" class="btn">← View All Invoices</a>', "invoices"))
+        msg = f'<div class="alert alert-warning">ℹ️ No new invoices for {period} — already generated or no registered students found in calendar events.</div>'
+    return HTMLResponse(page("Generate Invoices", msg + '<a href="/invoices" class="btn" style="margin-top:14px;">← View All Invoices</a>', "invoices"))
 
 
 @app.get("/invoices/{invoice_id}", response_class=HTMLResponse)
 def invoice_detail(invoice_id: str):
     invoices = get_all_invoices()
-    inv = next((i for i in invoices if i.get('ID') == invoice_id), None)
+    inv = next((i for i in invoices if i.get('id') == invoice_id), None)
     if not inv:
         return RedirectResponse(url="/invoices", status_code=303)
 
-    m       = int(inv.get('Month', 1))
-    total   = _safe_float(inv.get('TotalAmount', 0))
-    applied = _safe_float(inv.get('PaymentsApplied', 0))
-    balance = _safe_float(inv.get('BalanceDue', 0))
-    lessons = int(inv.get('LessonsCount', 0))
-    rate    = total / lessons if lessons > 0 else 0
-    status  = inv.get('Status', 'Unpaid')
-    badge   = '<span class="badge badge-success" style="font-size:14px;padding:5px 14px;">✅ Paid</span>' if status == 'Paid' else '<span class="badge badge-warning" style="font-size:14px;padding:5px 14px;">⏳ Unpaid</span>'
-    mark_btn = '' if status == 'Paid' else f'<form action="/mark-invoice-paid/{invoice_id}" method="post" style="display:inline;"><button type="submit" class="btn btn-success">✅ Mark as Paid</button></form>'
+    m        = int(inv.get('month', 1) or 1)
+    total    = _safe_float(inv.get('total_amount', 0))
+    paid_amt = _safe_float(inv.get('amount_paid', 0))
+    balance  = _safe_float(inv.get('balance_due', 0))
+    lessons  = int(inv.get('scheduled_lessons', 0) or 0)
+    rate     = total / lessons if lessons > 0 else 0
+    dst      = _display_status(inv)
+    stored   = inv.get('status', 'draft')
+
+    _ST_BADGE = {
+        'paid':    '<span class="badge badge-success" style="font-size:13px;padding:5px 14px;">✅ Paid</span>',
+        'sent':    '<span class="badge badge-info"    style="font-size:13px;padding:5px 14px;">📤 Sent</span>',
+        'draft':   '<span class="badge badge-muted"   style="font-size:13px;padding:5px 14px;">📝 Draft</span>',
+        'overdue': '<span class="badge badge-danger"  style="font-size:13px;padding:5px 14px;">🔴 Overdue</span>',
+    }
+    badge = _ST_BADGE.get(dst, f'<span class="badge badge-muted">{dst}</span>')
+
+    send_btn = (
+        f'<form action="/mark-invoice-sent/{invoice_id}" method="post" style="display:inline;">'
+        f'<button type="submit" class="btn btn-sm" style="background:#3b82f6;">📤 Mark as Sent</button></form>'
+        if stored == 'draft' else ''
+    )
+    pay_btn = (
+        f'<form action="/mark-invoice-paid/{invoice_id}" method="post" style="display:inline;">'
+        f'<button type="submit" class="btn btn-success btn-sm">✅ Mark as Paid</button></form>'
+        if stored != 'paid' else ''
+    )
+    paid_on = (
+        f'<span style="color:var(--muted);">Paid On</span><strong>{inv.get("paid_date", "")}</strong>'
+        if stored == 'paid' and inv.get('paid_date') else ''
+    )
 
     content = f"""
 <div class="card" style="max-width:580px;">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
-    <div><h2 style="margin:0;">Invoice #INV-{invoice_id.zfill(4)}</h2>
-    <div style="color:var(--muted);font-size:13px;margin-top:3px;">Created {inv.get('CreatedDate','')}</div></div>
+    <div>
+      <h2 style="margin:0;">Invoice #INV-{invoice_id.zfill(4)}</h2>
+      <div style="color:var(--muted);font-size:13px;margin-top:3px;">Created {inv.get('created_date', '')}</div>
+    </div>
     {badge}
   </div>
   <div style="background:var(--bg);border-radius:10px;padding:14px;margin-bottom:18px;">
-    <div style="display:grid;grid-template-columns:120px 1fr;gap:4px;font-size:13px;">
-      <span style="color:var(--muted);">Student</span><strong>{inv.get('Student','')}</strong>
-      <span style="color:var(--muted);">Period</span><strong>{MONTH_NAMES[m]} {inv.get('Year','')}</strong>
-      {'<span style="color:var(--muted);">Paid On</span><strong>' + inv.get('PaidDate','') + '</strong>' if status == 'Paid' and inv.get('PaidDate') else ''}
+    <div style="display:grid;grid-template-columns:140px 1fr;gap:6px;font-size:13px;">
+      <span style="color:var(--muted);">Student</span><strong>{inv.get('student_name', '')}</strong>
+      <span style="color:var(--muted);">Billing Period</span><strong>{MONTH_NAMES[m]} {inv.get('year', '')}</strong>
+      <span style="color:var(--muted);">Scheduled Lessons</span><strong>{lessons}</strong>
+      {paid_on}
     </div>
   </div>
   <table style="margin-bottom:18px;">
     <thead><tr><th>Description</th><th style="text-align:right;">Amount</th></tr></thead>
     <tbody>
-      <tr><td>{lessons} lesson{"s" if lessons != 1 else ""} × ${rate:.2f}/lesson</td><td style="text-align:right;font-weight:600;">${total:.2f}</td></tr>
-      <tr><td style="color:var(--success);">Payments Applied</td><td style="text-align:right;color:var(--success);font-weight:600;">−${applied:.2f}</td></tr>
-      <tr style="border-top:2px solid var(--border);"><td style="font-weight:700;padding:12px 13px;">Balance Due</td>
-        <td style="text-align:right;font-weight:800;font-size:18px;padding:12px 13px;color:{'var(--success)' if balance<=0 else 'var(--danger)'};">${balance:.2f}</td></tr>
+      <tr>
+        <td>{lessons} scheduled lesson{"s" if lessons != 1 else ""} × ${rate:.2f}/lesson</td>
+        <td style="text-align:right;font-weight:600;">${total:.2f}</td>
+      </tr>
+      <tr>
+        <td style="color:var(--success);">Amount Paid</td>
+        <td style="text-align:right;color:var(--success);font-weight:600;">−${paid_amt:.2f}</td>
+      </tr>
+      <tr style="border-top:2px solid var(--border);">
+        <td style="font-weight:700;padding:12px 13px;">Balance Due</td>
+        <td style="text-align:right;font-weight:800;font-size:18px;padding:12px 13px;
+            color:{'var(--success)' if balance <= 0 else 'var(--danger)'};">${balance:.2f}</td>
+      </tr>
     </tbody>
   </table>
-  <div style="display:flex;gap:8px;flex-wrap:wrap;">{mark_btn}<a href="/invoices" class="btn btn-outline">← All Invoices</a></div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    {send_btn}{pay_btn}
+    <a href="/invoices" class="btn btn-outline">← All Invoices</a>
+  </div>
 </div>"""
     return HTMLResponse(page(f"Invoice #INV-{invoice_id.zfill(4)}", content, "invoices"))
+
+
+@app.post("/mark-invoice-sent/{invoice_id}")
+def mark_invoice_sent(invoice_id: str):
+    invoices = get_all_invoices()
+    for inv in invoices:
+        if inv.get('id') == invoice_id and inv.get('status') == 'draft':
+            inv['status'] = 'sent'
+            break
+    save_all_invoices(invoices)
+    return RedirectResponse(url=f"/invoices/{invoice_id}?toast=Invoice+marked+as+sent", status_code=303)
 
 
 @app.post("/mark-invoice-paid/{invoice_id}")
 def mark_invoice_paid(invoice_id: str):
     invoices = get_all_invoices()
+    target = None
     for inv in invoices:
-        if inv.get('ID') == invoice_id:
-            inv['Status']     = 'Paid'
-            inv['PaidDate']   = datetime.now().strftime('%Y-%m-%d')
-            inv['BalanceDue'] = '0.00'
+        if inv.get('id') == invoice_id:
+            target = inv
+            inv['status']      = 'paid'
+            inv['paid_date']   = datetime.now().strftime('%Y-%m-%d')
+            inv['amount_paid'] = inv.get('total_amount', '0.00')
+            inv['balance_due'] = '0.00'
             break
     save_all_invoices(invoices)
+    if target:
+        m   = int(target.get('month', 1) or 1)
+        stu = target.get('student_name', '')
+        amt = _safe_float(target.get('total_amount', 0))
+        note = f"Invoice #{invoice_id} — {MONTH_NAMES[m]} {target.get('year', '')}"
+        with open(LEDGER_FILE, 'a', newline='') as lf:
+            csv.writer(lf).writerow([
+                datetime.now().strftime('%Y-%m-%d'), stu, 'Invoice Payment', f"{amt:.2f}", note,
+            ])
     return RedirectResponse(url=f"/invoices/{invoice_id}?toast=Invoice+marked+as+paid", status_code=303)
 
 
