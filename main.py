@@ -1044,21 +1044,30 @@ def dashboard():
                     safe_name     = student_name.replace('"', '&quot;') if student_name else ''
 
                     if is_registered:
+                        _btn_base = (
+                            f'<input type="hidden" name="student_name" value="{safe_name}">'
+                            f'<input type="hidden" name="event_date" value="{today_str}">'
+                            f'<input type="hidden" name="duration_minutes" value="{dur}">'
+                        )
                         action_html = (
                             f'<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">'
+                            # Confirm
                             f'<form action="/record-attendance" method="post" style="margin:0;">'
-                            f'<input type="hidden" name="student_name" value="{safe_name}">'
+                            f'{_btn_base}'
                             f'<input type="hidden" name="status" value="confirmed">'
-                            f'<input type="hidden" name="event_date" value="{today_str}">'
-                            f'<input type="hidden" name="duration_minutes" value="{dur}">'
-                            f'<button type="submit" class="btn btn-success btn-sm" style="padding:4px 14px;">✓ Confirm</button>'
+                            f'<button type="submit" class="btn btn-success btn-sm" style="padding:4px 14px;">✅ Confirm</button>'
                             f'</form>'
+                            # Missed / No-Show
                             f'<form action="/record-attendance" method="post" style="margin:0;">'
-                            f'<input type="hidden" name="student_name" value="{safe_name}">'
+                            f'{_btn_base}'
                             f'<input type="hidden" name="status" value="missed">'
-                            f'<input type="hidden" name="event_date" value="{today_str}">'
-                            f'<input type="hidden" name="duration_minutes" value="{dur}">'
-                            f'<button type="submit" class="btn btn-sm" style="padding:4px 14px;background:#f59e0b;color:#fff;border:none;cursor:pointer;border-radius:6px;font-size:12px;font-weight:600;">✗ Missed</button>'
+                            f'<button type="submit" class="btn btn-sm" style="padding:4px 14px;background:#ef4444;color:#fff;border:none;cursor:pointer;border-radius:6px;font-size:12px;font-weight:600;">❌ Missed</button>'
+                            f'</form>'
+                            # Cancel — no charge
+                            f'<form action="/record-attendance" method="post" style="margin:0;">'
+                            f'{_btn_base}'
+                            f'<input type="hidden" name="status" value="cancelled">'
+                            f'<button type="submit" class="btn btn-sm" style="padding:4px 14px;background:#94a3b8;color:#fff;border:none;cursor:pointer;border-radius:6px;font-size:12px;font-weight:600;">🔄 Cancel</button>'
                             f'</form>'
                             f'</div>'
                         )
@@ -1912,19 +1921,39 @@ def record_attendance(
 ):
     if status not in ("confirmed", "missed", "cancelled"):
         return RedirectResponse(url="/dashboard", status_code=303)
+
     labels = {
-        "confirmed":  "Lesson Confirmed",
-        "missed":     "Lesson Missed",
-        "cancelled":  "Lesson Cancelled",
+        "confirmed": "Lesson Confirmed",
+        "missed":    "Lesson Missed",
+        "cancelled": "Lesson Cancelled",
     }
+
+    # Confirmed and missed both charge the full lesson fee; cancelled is free
+    charge = 0.0
+    if status in ("confirmed", "missed"):
+        profiles = get_all_profiles()
+        profile  = profiles.get(student_name, {})
+        hourly   = float(profile.get('rate', 50))
+        charge   = round(hourly * duration_minutes / 60, 2)
+        # Deduct from prepaid balance (can go negative)
+        profile['prepaid'] = round(float(profile.get('prepaid', 0)) - charge, 2)
+        profiles[student_name] = profile
+        save_all_profiles(profiles)
+
     with open(LEDGER_FILE, 'a', newline='') as f:
         csv.writer(f).writerow([
-            event_date, student_name, labels[status], "0.00",
+            event_date, student_name, labels[status], f"{charge:.2f}",
             f"{duration_minutes} min - {status}",
         ])
     log_event("feature", detail=f"attendance:{status}")
-    toast = f"{student_name.replace(' ', '+')}+marked+as+{status}"
-    return RedirectResponse(url=f"/dashboard?toast={toast}", status_code=303)
+    toast_msg = (
+        f"{student_name.replace(' ', '+')}+confirmed+%E2%80%94+%24{charge:.2f}+charged"
+        if status == "confirmed" else
+        f"{student_name.replace(' ', '+')}+no-show+%E2%80%94+%24{charge:.2f}+charged"
+        if status == "missed" else
+        f"{student_name.replace(' ', '+')}+cancelled+%E2%80%94+no+charge"
+    )
+    return RedirectResponse(url=f"/dashboard?toast={toast_msg}", status_code=303)
 
 
 @app.get("/rates", response_class=HTMLResponse)
