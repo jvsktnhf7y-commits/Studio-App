@@ -4052,6 +4052,134 @@ async def mobile_record_attendance(request: Request):
                          "new_balance": float(profile.get("prepaid", 0))})
 
 
+PUSH_TOKENS_FILE = "/data/push_tokens.json"
+
+def _load_push_tokens() -> list:
+    if not os.path.exists(PUSH_TOKENS_FILE):
+        return []
+    with open(PUSH_TOKENS_FILE, 'r') as f:
+        return json.load(f)
+
+def _save_push_tokens(tokens: list):
+    with open(PUSH_TOKENS_FILE, 'w') as f:
+        json.dump(tokens, f)
+
+
+@app.get("/api/mobile/schedule")
+def mobile_schedule():
+    events   = get_upcoming_calendar_events(days=14)
+    profiles = get_all_profiles()
+    by_date  = {}
+    for e in events:
+        summary = e.get("summary", "")
+        name    = clean_student_name(summary)
+        start   = e.get("start", {})
+        dt_str  = start.get("dateTime", start.get("date", ""))
+        date    = dt_str[:10] if dt_str else ""
+        if not date:
+            continue
+        profile = profiles.get(name, {})
+        lesson  = {
+            "summary":          summary,
+            "student_name":     name,
+            "start":            dt_str,
+            "duration_minutes": e.get("duration_minutes", 60),
+            "is_registered":    name in profiles,
+            "prepaid_balance":  float(profile.get("prepaid", 0)) if profile else 0,
+            "rate":             float(profile.get("rate", 0)) if profile else 0,
+        }
+        by_date.setdefault(date, []).append(lesson)
+    days = [{"date": d, "lessons": ls} for d, ls in sorted(by_date.items())]
+    return JSONResponse({"ok": True, "days": days})
+
+
+@app.get("/api/mobile/student/{student_name}")
+def mobile_student_profile(student_name: str):
+    profiles = get_all_profiles()
+    if student_name not in profiles:
+        return JSONResponse({"ok": False, "error": "Student not found"}, status_code=404)
+    profile  = profiles[student_name]
+    notes    = get_notes_for_student(student_name)
+    upcoming = get_upcoming_lessons_for_student(student_name, days=28)
+    upcoming_list = []
+    for e in upcoming:
+        start  = e.get("start", {})
+        dt_str = start.get("dateTime", start.get("date", ""))
+        upcoming_list.append({"start": dt_str, "summary": e.get("summary", "")})
+    attendance = []
+    if os.path.exists(LEDGER_FILE):
+        with open(LEDGER_FILE, 'r') as f:
+            for row in csv.reader(f):
+                if len(row) >= 4 and row[1].strip() == student_name:
+                    attendance.append({
+                        "date":   row[0],
+                        "status": row[2],
+                        "amount": row[3],
+                        "notes":  row[4] if len(row) > 4 else "",
+                    })
+        attendance = sorted(attendance, key=lambda r: r["date"], reverse=True)[:20]
+    return JSONResponse({
+        "ok":       True,
+        "name":     student_name,
+        "tier":     profile.get("tier_name", ""),
+        "rate":     float(profile.get("rate", 0)),
+        "balance":  float(profile.get("prepaid", 0)),
+        "target_minutes": int(profile.get("target_minutes", 60)),
+        "upcoming": upcoming_list,
+        "attendance": attendance,
+        "notes":    [{"date": n["date"], "notes": n["notes"], "assignment": n["assignment"]} for n in notes[:10]],
+    })
+
+
+@app.post("/api/mobile/lesson-note")
+async def mobile_save_lesson_note(request: Request):
+    data         = await request.json()
+    student_name = data.get("student_name", "").strip()
+    date         = data.get("date", datetime.now().strftime("%Y-%m-%d"))
+    notes        = data.get("notes", "").strip()
+    assignment   = data.get("assignment", "").strip()
+    if not student_name or not notes:
+        return JSONResponse({"ok": False, "error": "student_name and notes are required"}, status_code=400)
+    save_note(student_name, date, notes, assignment)
+    log_event("feature", detail="mobile_lesson_note")
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/mobile/payment")
+async def mobile_record_payment(request: Request):
+    data         = await request.json()
+    student_name = data.get("student_name", "").strip()
+    amount       = float(data.get("amount", 0))
+    method       = data.get("method", "Cash").strip()
+    notes        = data.get("notes", "").strip()
+    date         = data.get("date", datetime.now().strftime("%Y-%m-%d"))
+    if not student_name or amount <= 0:
+        return JSONResponse({"ok": False, "error": "Invalid parameters"}, status_code=400)
+    profiles = get_all_profiles()
+    if student_name not in profiles:
+        return JSONResponse({"ok": False, "error": "Student not found"}, status_code=404)
+    profiles[student_name]["prepaid"] = round(float(profiles[student_name].get("prepaid", 0)) + amount, 2)
+    save_all_profiles(profiles)
+    full_notes = f"Payment - {method}. {notes}".strip().rstrip(".")
+    with open(LEDGER_FILE, 'a', newline='') as f:
+        csv.writer(f).writerow([date, student_name, "Payment", f"{amount:.2f}", full_notes])
+    log_event("feature", detail=f"mobile_payment:{amount:.2f}")
+    return JSONResponse({"ok": True, "new_balance": float(profiles[student_name]["prepaid"])})
+
+
+@app.post("/api/mobile/register-push")
+async def mobile_register_push(request: Request):
+    data  = await request.json()
+    token = data.get("token", "").strip()
+    if not token:
+        return JSONResponse({"ok": False, "error": "No token"}, status_code=400)
+    tokens = _load_push_tokens()
+    if token not in tokens:
+        tokens.append(token)
+        _save_push_tokens(tokens)
+    return JSONResponse({"ok": True})
+
+
 # ─── Beta Analytics ────────────────────────────────────────────────────────────
 
 @app.get("/beta-analytics", response_class=HTMLResponse)
