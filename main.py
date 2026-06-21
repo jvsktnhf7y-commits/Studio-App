@@ -1819,7 +1819,9 @@ async def auth_middleware(request: Request, call_next):
     if path.startswith("/api/mobile/"):
         if path == "/api/mobile/login":
             return await call_next(request)
-        if request.cookies.get("session") != "authenticated":
+        auth_header = request.headers.get("Authorization", "")
+        cookie_session = request.cookies.get("session", "")
+        if auth_header != "Bearer authenticated" and cookie_session != "authenticated":
             return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
         return await call_next(request)
 
