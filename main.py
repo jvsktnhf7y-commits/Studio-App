@@ -1817,12 +1817,24 @@ async def auth_middleware(request: Request, call_next):
 
     # Mobile API — return JSON errors instead of HTML redirects
     if path.startswith("/api/mobile/"):
-        if path == "/api/mobile/login":
+        if path in ("/api/mobile/login", "/api/mobile/parent/login", "/api/mobile/student/login"):
             return await call_next(request)
-        auth_header = request.headers.get("Authorization", "")
-        cookie_session = request.cookies.get("session", "")
-        if auth_header != "Bearer authenticated" and cookie_session != "authenticated":
-            return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+        # Teacher routes
+        if not path.startswith("/api/mobile/parent/") and not path.startswith("/api/mobile/student/"):
+            auth_header = request.headers.get("Authorization", "")
+            cookie_session = request.cookies.get("session", "")
+            if auth_header != "Bearer authenticated" and cookie_session != "authenticated":
+                return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+        # Parent routes
+        if path.startswith("/api/mobile/parent/"):
+            auth_header = request.headers.get("Authorization", "")
+            if not auth_header.startswith("Bearer parent:"):
+                return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+        # Student routes
+        if path.startswith("/api/mobile/student/"):
+            auth_header = request.headers.get("Authorization", "")
+            if not auth_header.startswith("Bearer student:"):
+                return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
         return await call_next(request)
 
     # Parent portal — separate auth via parent_session cookie
@@ -4178,6 +4190,111 @@ async def mobile_register_push(request: Request):
         tokens.append(token)
         _save_push_tokens(tokens)
     return JSONResponse({"ok": True})
+
+
+# ─── Mobile Parent API ─────────────────────────────────────────────────────────
+
+@app.post("/api/mobile/parent/login")
+async def mobile_parent_login(request: Request):
+    data     = await request.json()
+    email    = data.get("email", "").strip().lower()
+    password = data.get("password", "")
+    pw_hash  = hashlib.sha256(password.encode()).hexdigest()
+    for user in get_all_users():
+        if user.get("email", "").lower() == email and user.get("password_hash") == pw_hash and user.get("role") == "parent":
+            student = user.get("linked_student", "")
+            return JSONResponse({"ok": True, "session": f"parent:{email}", "student_name": student, "email": email})
+    return JSONResponse({"ok": False, "error": "Invalid email or password"}, status_code=401)
+
+
+@app.get("/api/mobile/parent/dashboard")
+def mobile_parent_dashboard(request: Request):
+    auth         = request.headers.get("Authorization", "")
+    email        = auth.replace("Bearer parent:", "").strip()
+    user         = next((u for u in get_all_users() if u.get("email") == email and u.get("role") == "parent"), None)
+    if not user:
+        return JSONResponse({"ok": False, "error": "Not found"}, status_code=404)
+    student_name = user.get("linked_student", "")
+    profile      = get_all_profiles().get(student_name, {})
+    balance      = float(profile.get("prepaid", 0))
+    upcoming     = get_upcoming_lessons_for_student(student_name, days=28)
+    upcoming_list = []
+    for e in upcoming:
+        start  = e.get("start", {})
+        dt_str = start.get("dateTime", start.get("date", ""))
+        upcoming_list.append({"start": dt_str, "summary": e.get("summary", "")})
+    notes = get_notes_for_student(student_name)
+    latest_note = None
+    if notes:
+        n = notes[0]
+        latest_note = {"date": n["date"], "notes": n["notes"], "assignment": n["assignment"]}
+    ledger = []
+    if os.path.exists(LEDGER_FILE):
+        with open(LEDGER_FILE, 'r') as f:
+            for row in csv.reader(f):
+                if len(row) >= 4 and row[1].strip() == student_name:
+                    ledger.append({"date": row[0], "status": row[2], "amount": row[3], "notes": row[4] if len(row) > 4 else ""})
+        ledger = sorted(ledger, key=lambda r: r["date"], reverse=True)[:20]
+    return JSONResponse({
+        "ok":           True,
+        "student_name": student_name,
+        "balance":      balance,
+        "upcoming":     upcoming_list,
+        "latest_note":  latest_note,
+        "ledger":       ledger,
+    })
+
+
+@app.get("/api/mobile/parent/notes")
+def mobile_parent_notes(request: Request):
+    auth         = request.headers.get("Authorization", "")
+    email        = auth.replace("Bearer parent:", "").strip()
+    user         = next((u for u in get_all_users() if u.get("email") == email and u.get("role") == "parent"), None)
+    if not user:
+        return JSONResponse({"ok": False, "error": "Not found"}, status_code=404)
+    student_name = user.get("linked_student", "")
+    notes        = get_notes_for_student(student_name)
+    return JSONResponse({"ok": True, "student_name": student_name, "notes": [
+        {"date": n["date"], "notes": n["notes"], "assignment": n["assignment"]} for n in notes
+    ]})
+
+
+# ─── Mobile Student API ─────────────────────────────────────────────────────────
+
+@app.post("/api/mobile/student/login")
+async def mobile_student_login(request: Request):
+    data         = await request.json()
+    student_name = data.get("student_name", "").strip()
+    access_code  = data.get("access_code", "").strip()
+    profiles     = get_all_profiles()
+    profile      = profiles.get(student_name, {})
+    stored       = profile.get("access_code", "")
+    if not stored:
+        return JSONResponse({"ok": False, "error": "No access code set. Ask your teacher."}, status_code=401)
+    if access_code != stored:
+        return JSONResponse({"ok": False, "error": "Incorrect access code"}, status_code=401)
+    return JSONResponse({"ok": True, "session": f"student:{student_name}", "student_name": student_name})
+
+
+@app.get("/api/mobile/student/dashboard")
+def mobile_student_dashboard(request: Request):
+    auth         = request.headers.get("Authorization", "")
+    student_name = auth.replace("Bearer student:", "").strip()
+    if not student_name:
+        return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+    upcoming = get_upcoming_lessons_for_student(student_name, days=28)
+    upcoming_list = []
+    for e in upcoming:
+        start  = e.get("start", {})
+        dt_str = start.get("dateTime", start.get("date", ""))
+        upcoming_list.append({"start": dt_str, "summary": e.get("summary", "")})
+    notes = get_notes_for_student(student_name)
+    return JSONResponse({
+        "ok":           True,
+        "student_name": student_name,
+        "upcoming":     upcoming_list,
+        "notes":        [{"date": n["date"], "notes": n["notes"], "assignment": n["assignment"]} for n in notes],
+    })
 
 
 # ─── Beta Analytics ────────────────────────────────────────────────────────────
