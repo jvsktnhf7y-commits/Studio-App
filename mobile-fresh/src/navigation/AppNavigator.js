@@ -6,6 +6,7 @@ import { ActivityIndicator, Text, TouchableOpacity, View, Platform } from 'react
 import * as Notifications from 'expo-notifications';
 
 import LoginScreen          from '../screens/LoginScreen';
+import OnboardingScreen     from '../screens/OnboardingScreen';
 import DashboardScreen      from '../screens/DashboardScreen';
 import ScheduleScreen       from '../screens/ScheduleScreen';
 import StudentsScreen       from '../screens/StudentsScreen';
@@ -14,6 +15,7 @@ import StudentProfileScreen from '../screens/StudentProfileScreen';
 import LessonNoteScreen     from '../screens/LessonNoteScreen';
 import PaymentScreen        from '../screens/PaymentScreen';
 import { isLoggedIn, logout, registerPushToken } from '../services/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, GRADIENT } from '../theme';
 
 const Stack = createNativeStackNavigator();
@@ -104,14 +106,16 @@ function MainTabs({ navigation }) {
 }
 
 export default function AppNavigator() {
-  const [checking, setChecking] = useState(true);
-  const [authed,   setAuthed]   = useState(false);
+  const [checking,    setChecking]    = useState(true);
+  const [authed,      setAuthed]      = useState(false);
+  const [onboarded,   setOnboarded]   = useState(true);
 
   useEffect(() => {
-    isLoggedIn().then((v) => {
-      setAuthed(v);
+    Promise.all([isLoggedIn(), AsyncStorage.getItem('onboarding_done')]).then(([loggedIn, done]) => {
+      setAuthed(loggedIn);
+      setOnboarded(!!done);
       setChecking(false);
-      if (v) registerForPushNotifications();
+      if (loggedIn) registerForPushNotifications();
     });
   }, []);
 
@@ -133,10 +137,11 @@ export default function AppNavigator() {
   return (
     <NavigationContainer>
       <Stack.Navigator
-        initialRouteName={authed ? 'Main' : 'Login'}
+        initialRouteName={authed ? 'Main' : onboarded ? 'Login' : 'Onboarding'}
         screenOptions={{ headerShown: false }}
       >
-        <Stack.Screen name="Login" component={LoginScreen} />
+        <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+        <Stack.Screen name="Login"      component={LoginScreen} />
         <Stack.Screen name="Main"  component={MainTabs} />
         <Stack.Screen name="Attendance"     component={AttendanceScreen}     options={{ ...sharedHeaderOptions, title: 'Record Attendance' }} />
         <Stack.Screen name="StudentProfile" component={StudentProfileScreen} options={{ ...sharedHeaderOptions, title: '' }} />

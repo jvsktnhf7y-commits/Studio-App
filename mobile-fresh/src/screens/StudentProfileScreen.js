@@ -1,11 +1,11 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, StyleSheet,
-  RefreshControl, ActivityIndicator, Alert, TouchableOpacity,
+  RefreshControl, ActivityIndicator, Alert, TouchableOpacity, Share,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Card from '../components/Card';
-import { getStudentProfile } from '../services/api';
+import { getStudentProfile, setAccessCode } from '../services/api';
 import { COLORS, GRADIENT, SHADOW_SM } from '../theme';
 
 function formatDate(dateStr) {
@@ -32,15 +32,17 @@ const STATUS_STYLES = {
 
 export default function StudentProfileScreen({ route, navigation }) {
   const { name } = route.params;
-  const [data,       setData]       = useState(null);
-  const [loading,    setLoading]    = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [data,         setData]         = useState(null);
+  const [loading,      setLoading]      = useState(true);
+  const [refreshing,   setRefreshing]   = useState(false);
+  const [accessCode,   setAccessCode_]  = useState('');
+  const [savingCode,   setSavingCode]   = useState(false);
 
   const load = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true);
     try {
       const res = await getStudentProfile(name);
-      if (res.ok) setData(res);
+      if (res.ok) { setData(res); setAccessCode_(res.access_code || ''); }
       else Alert.alert('Error', res.error || 'Failed to load profile.');
     } catch {
       Alert.alert('Error', 'Could not connect to server.');
@@ -70,6 +72,32 @@ export default function StudentProfileScreen({ route, navigation }) {
     return <View style={styles.center}><ActivityIndicator size="large" color={COLORS.primary} /></View>;
   }
   if (!data) return null;
+
+  function generateCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  }
+
+  async function handleGenerateCode() {
+    const code = generateCode();
+    setSavingCode(true);
+    try {
+      const res = await setAccessCode(name, code);
+      if (res.ok) {
+        setAccessCode_(res.code);
+        Alert.alert('Access code set!', `Share this code with ${name}:\n\n${res.code}`, [
+          { text: 'Share', onPress: () => Share.share({ message: `Your Studio Manager access code is: ${res.code}` }) },
+          { text: 'OK' },
+        ]);
+      }
+    } catch { Alert.alert('Error', 'Could not save access code.'); }
+    finally { setSavingCode(false); }
+  }
+
+  async function handleShareCode() {
+    if (!accessCode) return;
+    await Share.share({ message: `Your Studio Manager access code is: ${accessCode}` });
+  }
 
   const balance      = data.balance ?? 0;
   const balanceColor = balance < 0 ? COLORS.danger : balance < 50 ? COLORS.warning : COLORS.success;
@@ -147,6 +175,35 @@ export default function StudentProfileScreen({ route, navigation }) {
         </View>
       )}
 
+      {/* Student access code */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Student App Access</Text>
+        <Card style={styles.codeCard}>
+          {accessCode ? (
+            <>
+              <Text style={styles.codeLabel}>Current access code</Text>
+              <Text style={styles.codeValue}>{accessCode}</Text>
+              <View style={styles.codeButtons}>
+                <TouchableOpacity onPress={handleShareCode} style={styles.shareBtn} activeOpacity={0.8}>
+                  <Text style={styles.shareBtnText}>📤  Share Code</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={handleGenerateCode} disabled={savingCode} style={styles.regenBtn} activeOpacity={0.8}>
+                  <Text style={styles.regenBtnText}>{savingCode ? '...' : '🔄  New Code'}</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={styles.codeLabel}>No access code set</Text>
+              <Text style={styles.codeSub}>Generate a code so {name} can log into the Student app</Text>
+              <TouchableOpacity onPress={handleGenerateCode} disabled={savingCode} style={[styles.shareBtn, { marginTop: 12 }]} activeOpacity={0.8}>
+                <Text style={styles.shareBtnText}>{savingCode ? 'Generating...' : '✨  Generate Access Code'}</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </Card>
+      </View>
+
       <TouchableOpacity
         style={styles.noteBtn}
         onPress={() => navigation.navigate('LessonNote', { studentName: name })}
@@ -188,4 +245,13 @@ const styles = StyleSheet.create({
   noteBtn:         { marginTop: 8, borderRadius: 14, overflow: 'hidden' },
   noteBtnGrad:     { paddingVertical: 14, alignItems: 'center' },
   noteBtnText:     { color: '#fff', fontSize: 16, fontWeight: '700' },
+  codeCard:        { padding: 16 },
+  codeLabel:       { fontSize: 12, fontWeight: '700', color: COLORS.subtext, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 },
+  codeValue:       { fontSize: 32, fontWeight: '800', color: COLORS.primary, letterSpacing: 4, marginBottom: 14 },
+  codeSub:         { fontSize: 13, color: COLORS.muted, marginBottom: 4 },
+  codeButtons:     { flexDirection: 'row', gap: 10 },
+  shareBtn:        { flex: 1, backgroundColor: '#ede9fe', borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
+  shareBtnText:    { color: COLORS.primary, fontWeight: '700', fontSize: 14 },
+  regenBtn:        { flex: 1, backgroundColor: COLORS.bg, borderRadius: 10, paddingVertical: 10, alignItems: 'center', borderWidth: 1.5, borderColor: COLORS.border },
+  regenBtnText:    { color: COLORS.subtext, fontWeight: '700', fontSize: 14 },
 });

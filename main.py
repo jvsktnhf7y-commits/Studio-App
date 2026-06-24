@@ -2526,6 +2526,74 @@ def record_payment(
 def test():
     return {"status": "ok"}
 
+
+@app.post("/api/mobile/student/{student_name}/access-code")
+async def mobile_set_access_code(student_name: str, request: Request):
+    data    = await request.json()
+    code    = data.get("code", "").strip().upper()
+    if not code:
+        return JSONResponse({"ok": False, "error": "code is required"}, status_code=400)
+    profiles = get_all_profiles()
+    if student_name not in profiles:
+        return JSONResponse({"ok": False, "error": "Student not found"}, status_code=404)
+    profiles[student_name]["access_code"] = code
+    save_all_profiles(profiles)
+    return JSONResponse({"ok": True, "code": code})
+
+
+def _send_expo_push(token: str, title: str, body: str):
+    try:
+        import urllib.request, json as _json
+        payload = _json.dumps({
+            "to": token, "title": title, "body": body,
+            "sound": "default", "priority": "high",
+        }).encode()
+        req = urllib.request.Request(
+            "https://exp.host/--/api/v2/push/send",
+            data=payload,
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        )
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as e:
+        print(f"Push error: {e}")
+
+
+@app.get("/api/cron/push-reminders")
+def cron_push_reminders(request: Request):
+    """Call this endpoint hourly (e.g. via cron-job.org) to send lesson reminders."""
+    secret = request.headers.get("X-Cron-Secret", "")
+    if secret != os.environ.get("CRON_SECRET", ""):
+        return JSONResponse({"ok": False, "error": "forbidden"}, status_code=403)
+
+    tokens = _load_push_tokens()
+    if not tokens:
+        return JSONResponse({"ok": True, "sent": 0})
+
+    tz      = pytz.timezone("America/New_York")
+    now     = datetime.now(tz)
+    in_hour = now + timedelta(hours=1)
+
+    events  = get_upcoming_calendar_events(days=1)
+    sent    = 0
+    for e in events:
+        start_str = e.get("start", {}).get("dateTime", "")
+        if not start_str:
+            continue
+        try:
+            start_dt = datetime.fromisoformat(start_str).astimezone(tz)
+        except Exception:
+            continue
+        diff = (start_dt - now).total_seconds()
+        if 3300 <= diff <= 3900:
+            name     = clean_student_name(e.get("summary", "Lesson"))
+            time_str = start_dt.strftime("%-I:%M %p")
+            for token in tokens:
+                _send_expo_push(token, "Lesson in 1 hour", f"{name} at {time_str}")
+                sent += 1
+
+    return JSONResponse({"ok": True, "sent": sent})
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
@@ -4131,15 +4199,16 @@ def mobile_student_profile(student_name: str):
                     })
         attendance = sorted(attendance, key=lambda r: r["date"], reverse=True)[:20]
     return JSONResponse({
-        "ok":       True,
-        "name":     student_name,
-        "tier":     profile.get("tier_name", ""),
-        "rate":     float(profile.get("rate", 0)),
-        "balance":  float(profile.get("prepaid", 0)),
+        "ok":           True,
+        "name":         student_name,
+        "tier":         profile.get("tier_name", ""),
+        "rate":         float(profile.get("rate", 0)),
+        "balance":      float(profile.get("prepaid", 0)),
         "target_minutes": int(profile.get("target_minutes", 60)),
-        "upcoming": upcoming_list,
-        "attendance": attendance,
-        "notes":    [{"date": n["date"], "notes": n["notes"], "assignment": n["assignment"]} for n in notes[:10]],
+        "access_code":  profile.get("access_code", ""),
+        "upcoming":     upcoming_list,
+        "attendance":   attendance,
+        "notes":        [{"date": n["date"], "notes": n["notes"], "assignment": n["assignment"]} for n in notes[:10]],
     })
 
 

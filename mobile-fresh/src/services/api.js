@@ -90,3 +90,8 @@ export async function registerPushToken(token) {
   const res = await client.post('/api/mobile/register-push', { token });
   return res.data;
 }
+
+export async function setAccessCode(studentName, code) {
+  const res = await client.post(`/api/mobile/student/${encodeURIComponent(studentName)}/access-code`, { code });
+  return res.data;
+}
