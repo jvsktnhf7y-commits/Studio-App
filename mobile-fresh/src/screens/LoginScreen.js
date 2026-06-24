@@ -7,6 +7,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Button from '../components/Button';
 import { login, registerPushToken } from '../services/api';
 import * as Notifications from 'expo-notifications';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, GRADIENT } from '../theme';
 
 export default function LoginScreen({ navigation }) {
@@ -23,6 +24,7 @@ export default function LoginScreen({ navigation }) {
     try {
       const res = await login(email.trim().toLowerCase(), password);
       if (res.ok) {
+        await AsyncStorage.setItem('teacher_email', email.trim().toLowerCase());
         try {
           const { status } = await Notifications.requestPermissionsAsync();
           if (status === 'granted') {

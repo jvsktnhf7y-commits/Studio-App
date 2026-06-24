@@ -547,7 +547,7 @@ USERS_FILE    = "/data/users.csv"
 USERS_HEADERS = [
     "name", "email", "password_hash", "is_beta_tester", "created_at",
     "is_verified", "verification_token", "reset_token", "reset_token_expires",
-    "role", "linked_student",
+    "role", "linked_student", "stripe_connect_id", "stripe_connect_ready",
 ]
 os.makedirs("/data", exist_ok=True)
 
@@ -4130,6 +4130,164 @@ async def mobile_record_attendance(request: Request):
     log_event("attendance", user=student_name, detail=status)
     return JSONResponse({"ok": True, "status": status, "charge": charge,
                          "new_balance": float(profile.get("prepaid", 0))})
+
+
+# ─── Stripe Connect — Teacher Onboarding & Parent Payments ────────────────────
+
+CONVENIENCE_FEE_CENTS = 300  # $3.00 flat fee charged to parent
+
+def _get_teacher_user(email: str) -> dict | None:
+    return next((u for u in get_all_users() if u.get("email") == email and u.get("role") in ("admin", "teacher")), None)
+
+def _update_user_field(email: str, **kwargs):
+    users = get_all_users()
+    with open(USERS_FILE, 'w', newline='') as f:
+        w = csv.DictWriter(f, fieldnames=USERS_HEADERS)
+        w.writeheader()
+        for u in users:
+            if u.get("email") == email:
+                u.update(kwargs)
+            w.writerow({k: u.get(k, '') for k in USERS_HEADERS})
+
+
+@app.get("/api/mobile/teacher/stripe-status")
+def mobile_teacher_stripe_status(request: Request):
+    auth  = request.headers.get("Authorization", "")
+    email = auth.replace("Bearer authenticated", "").strip()
+    # Derive teacher email from session — stored in users.csv
+    for u in get_all_users():
+        if u.get("role") in ("admin", "teacher"):
+            return JSONResponse({
+                "ok":    True,
+                "ready": u.get("stripe_connect_ready", "") == "yes",
+                "email": u.get("email", ""),
+            })
+    return JSONResponse({"ok": False, "error": "Teacher not found"}, status_code=404)
+
+
+@app.post("/api/mobile/teacher/stripe-connect")
+async def mobile_teacher_stripe_connect(request: Request):
+    """Generate a Stripe Connect onboarding URL for the teacher."""
+    if not _STRIPE_READY:
+        return JSONResponse({"ok": False, "error": "Stripe not configured"}, status_code=503)
+    data  = await request.json()
+    email = data.get("email", "").strip().lower()
+    user  = next((u for u in get_all_users() if u.get("email") == email), None)
+    if not user:
+        return JSONResponse({"ok": False, "error": "User not found"}, status_code=404)
+
+    connect_id = user.get("stripe_connect_id", "")
+    if not connect_id:
+        account    = _stripe.Account.create(type="express", email=email, capabilities={"card_payments": {"requested": True}, "transfers": {"requested": True}})
+        connect_id = account.id
+        _update_user_field(email, stripe_connect_id=connect_id)
+
+    base = os.environ.get("APP_BASE_URL", "https://studio-app-7y7z.onrender.com")
+    link = _stripe.AccountLink.create(
+        account=connect_id,
+        refresh_url=f"{base}/api/mobile/teacher/stripe-connect-refresh?email={email}",
+        return_url=f"{base}/api/mobile/teacher/stripe-connect-return?email={email}",
+        type="account_onboarding",
+    )
+    return JSONResponse({"ok": True, "url": link.url})
+
+
+@app.get("/api/mobile/teacher/stripe-connect-return")
+def stripe_connect_return(email: str = ""):
+    """Called by Stripe after teacher completes Connect onboarding."""
+    if email:
+        try:
+            user = next((u for u in get_all_users() if u.get("email") == email), None)
+            if user:
+                connect_id = user.get("stripe_connect_id", "")
+                if connect_id:
+                    acct = _stripe.Account.retrieve(connect_id)
+                    if acct.get("charges_enabled"):
+                        _update_user_field(email, stripe_connect_ready="yes")
+        except Exception:
+            pass
+    return HTMLResponse("<html><body><h2>✅ Stripe setup complete! Return to the app.</h2></body></html>")
+
+
+@app.get("/api/mobile/teacher/stripe-connect-refresh")
+def stripe_connect_refresh(email: str = ""):
+    return HTMLResponse("<html><body><h2>Session expired. Please return to the app and try again.</h2></body></html>")
+
+
+@app.post("/api/mobile/parent/create-payment-intent")
+async def mobile_parent_create_payment_intent(request: Request):
+    """Create a Stripe PaymentIntent for a parent paying a lesson fee."""
+    if not _STRIPE_READY:
+        return JSONResponse({"ok": False, "error": "Payments not configured"}, status_code=503)
+
+    auth         = request.headers.get("Authorization", "")
+    email        = auth.replace("Bearer parent:", "").strip()
+    user         = next((u for u in get_all_users() if u.get("email") == email and u.get("role") == "parent"), None)
+    if not user:
+        return JSONResponse({"ok": False, "error": "Not found"}, status_code=404)
+
+    data         = await request.json()
+    amount_cents = int(data.get("amount_cents", 0))
+    description  = data.get("description", "Lesson payment")
+    student_name = user.get("linked_student", "")
+
+    if amount_cents <= 0:
+        return JSONResponse({"ok": False, "error": "Invalid amount"}, status_code=400)
+
+    # Find the teacher's Stripe Connect account
+    teacher = next((u for u in get_all_users() if u.get("role") in ("admin", "teacher") and u.get("stripe_connect_ready") == "yes"), None)
+    if not teacher or not teacher.get("stripe_connect_id"):
+        return JSONResponse({"ok": False, "error": "Teacher has not set up payments yet"}, status_code=503)
+
+    total_cents = amount_cents + CONVENIENCE_FEE_CENTS
+
+    intent = _stripe.PaymentIntent.create(
+        amount=total_cents,
+        currency="usd",
+        description=f"{description} — {student_name}",
+        transfer_data={"destination": teacher["stripe_connect_id"], "amount": amount_cents},
+        metadata={"student_name": student_name, "parent_email": email, "lesson_amount_cents": amount_cents},
+        automatic_payment_methods={"enabled": True},
+    )
+    return JSONResponse({
+        "ok":            True,
+        "client_secret": intent.client_secret,
+        "publishable_key": STRIPE_PUBLISHABLE_KEY,
+        "amount_cents":  amount_cents,
+        "fee_cents":     CONVENIENCE_FEE_CENTS,
+        "total_cents":   total_cents,
+    })
+
+
+@app.post("/webhooks/stripe-connect")
+async def stripe_connect_webhook(request: Request):
+    """Handle Stripe Connect webhooks — record payment when parent pays."""
+    payload    = await request.body()
+    sig_header = request.headers.get("stripe-signature", "")
+    connect_secret = os.environ.get("STRIPE_CONNECT_WEBHOOK_SECRET", "")
+    try:
+        event = _stripe.Webhook.construct_event(payload, sig_header, connect_secret)
+    except Exception:
+        return JSONResponse({"ok": False}, status_code=400)
+
+    if event["type"] == "payment_intent.succeeded":
+        pi           = event["data"]["object"]
+        meta         = pi.get("metadata", {})
+        student_name = meta.get("student_name", "")
+        amount_cents = int(meta.get("lesson_amount_cents", 0))
+        amount_dollars = amount_cents / 100
+
+        if student_name and amount_dollars > 0:
+            profiles = get_all_profiles()
+            if student_name in profiles:
+                profiles[student_name]["prepaid"] = round(float(profiles[student_name].get("prepaid", 0)) + amount_dollars, 2)
+                save_all_profiles(profiles)
+            today = datetime.now().strftime("%Y-%m-%d")
+            with open(LEDGER_FILE, 'a', newline='') as f:
+                csv.writer(f).writerow([today, student_name, "Payment", f"{amount_dollars:.2f}", "Online payment via Stripe"])
+            log_event("feature", detail=f"stripe_connect_payment:{amount_dollars:.2f}")
+
+    return JSONResponse({"ok": True})
 
 
 PUSH_TOKENS_FILE = "/data/push_tokens.json"

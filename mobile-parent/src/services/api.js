@@ -51,3 +51,11 @@ export async function getNotes() {
   const res = await client.get('/api/mobile/parent/notes');
   return res.data;
 }
+
+export async function createPaymentIntent(amountCents, description) {
+  const res = await client.post('/api/mobile/parent/create-payment-intent', {
+    amount_cents: amountCents,
+    description,
+  });
+  return res.data;
+}

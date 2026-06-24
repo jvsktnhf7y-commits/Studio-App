@@ -5,8 +5,9 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { ActivityIndicator, Text, TouchableOpacity, View, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 
-import LoginScreen          from '../screens/LoginScreen';
-import OnboardingScreen     from '../screens/OnboardingScreen';
+import LoginScreen           from '../screens/LoginScreen';
+import OnboardingScreen      from '../screens/OnboardingScreen';
+import StripeConnectScreen   from '../screens/StripeConnectScreen';
 import DashboardScreen      from '../screens/DashboardScreen';
 import ScheduleScreen       from '../screens/ScheduleScreen';
 import StudentsScreen       from '../screens/StudentsScreen';
@@ -46,7 +47,7 @@ async function registerForPushNotifications() {
 }
 
 function TabIcon({ label, focused }) {
-  const icons = { Today: '📅', Schedule: '🗓️', Students: '👥' };
+  const icons = { Today: '📅', Schedule: '🗓️', Students: '👥', Payments: '💳' };
   return (
     <Text style={{ fontSize: focused ? 22 : 19, opacity: focused ? 1 : 0.5 }}>
       {icons[label]}
@@ -100,6 +101,11 @@ function MainTabs({ navigation }) {
         name="Students"
         component={StudentsScreen}
         options={{ title: 'Students' }}
+      />
+      <Tab.Screen
+        name="Payments"
+        component={StripeConnectScreen}
+        options={{ title: 'Payments' }}
       />
     </Tab.Navigator>
   );

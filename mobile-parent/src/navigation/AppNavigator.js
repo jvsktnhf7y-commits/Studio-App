@@ -3,18 +3,22 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
+import { StripeProvider } from '@stripe/stripe-react-native';
 
-import LoginScreen    from '../screens/LoginScreen';
+import LoginScreen     from '../screens/LoginScreen';
 import DashboardScreen from '../screens/DashboardScreen';
-import NotesScreen    from '../screens/NotesScreen';
+import NotesScreen     from '../screens/NotesScreen';
+import PaymentScreen   from '../screens/PaymentScreen';
 import { isLoggedIn, logout } from '../services/api';
 import { COLORS } from '../theme';
 
 const Stack = createNativeStackNavigator();
 const Tab   = createBottomTabNavigator();
 
+const STRIPE_PK = 'pk_live_YOUR_PUBLISHABLE_KEY'; // replace after Stripe Connect is set up
+
 function TabIcon({ label, focused }) {
-  const icons = { Home: '🏠', Notes: '📝' };
+  const icons = { Home: '🏠', Notes: '📝', Pay: '💳' };
   return <Text style={{ fontSize: focused ? 22 : 19, opacity: focused ? 1 : 0.5 }}>{icons[label]}</Text>;
 }
 
@@ -40,7 +44,8 @@ function MainTabs({ navigation }) {
           </TouchableOpacity>
         ),
       }} />
-      <Tab.Screen name="Notes" component={NotesScreen} options={{ title: 'Lesson Notes' }} />
+      <Tab.Screen name="Notes" component={NotesScreen}   options={{ title: 'Lesson Notes' }} />
+      <Tab.Screen name="Pay"   component={PaymentScreen} options={{ title: 'Make a Payment' }} />
     </Tab.Navigator>
   );
 }
@@ -60,11 +65,13 @@ export default function AppNavigator() {
   );
 
   return (
-    <NavigationContainer>
-      <Stack.Navigator initialRouteName={authed ? 'Main' : 'Login'} screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="Login" component={LoginScreen} />
-        <Stack.Screen name="Main"  component={MainTabs} />
-      </Stack.Navigator>
-    </NavigationContainer>
+    <StripeProvider publishableKey={STRIPE_PK}>
+      <NavigationContainer>
+        <Stack.Navigator initialRouteName={authed ? 'Main' : 'Login'} screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="Main"  component={MainTabs} />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </StripeProvider>
   );
 }
