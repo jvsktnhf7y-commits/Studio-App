@@ -226,18 +226,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--primary);box-shadow:0
 .login-wrap{min-height:100vh;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px;}
 .login-card{background:#fff;border-radius:18px;padding:36px;width:100%;max-width:390px;border:1px solid var(--border);box-shadow:0 8px 32px rgba(0,0,0,.08);}
 .login-logo{width:52px;height:52px;border-radius:13px;background:linear-gradient(135deg,var(--primary),var(--secondary));display:flex;align-items:center;justify-content:center;font-size:24px;margin:0 auto 18px;}
-.menu-btn{display:none;background:none;border:none;font-size:20px;cursor:pointer;color:var(--dark);padding:4px;}
-.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:150;}
+.menu-btn{display:none;}
+.sidebar-overlay{display:none;}
 @media(max-width:768px){
-  .sidebar{transform:translateX(-100%);}
-  .sidebar.open{transform:translateX(0);}
-  .sidebar-overlay.open{display:block;}
-  .main{margin-left:0;}
-  .page-body{padding:14px;}
-  .topbar{padding:0 14px;}
-  .menu-btn{display:block;}
   .two-col,.three-col,.grid{grid-template-columns:1fr;}
   h1{font-size:18px;}
+  .page-body{padding:14px;}
+  .topbar{padding:0 14px;}
 }
 .toast-container{position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:10px;pointer-events:none;}
 .toast{background:#1e293b;color:#fff;padding:12px 18px;border-radius:10px;font-size:13px;font-weight:500;box-shadow:0 4px 16px rgba(0,0,0,.18);display:flex;align-items:center;gap:10px;opacity:1;transform:translateY(0);transition:opacity .4s ease,transform .4s ease;pointer-events:auto;}
@@ -1903,7 +1898,7 @@ def students_page(new_name: str = Query("")):
   <td><div style="display:flex;align-items:center;gap:10px;">
     <div class="student-avatar" style="width:30px;height:30px;font-size:11px;border-radius:7px;">{initials}</div>
     <strong>{name}</strong></div></td>
-  <td>${data['rate']:.0f}/hr</td>
+  <td>${data['rate']:.2f}/lesson</td>
   <td>{data.get('target_minutes',60)} min</td>
   <td>{data.get('description','') or '—'}</td>
   <td><span class="badge badge-info">${prepaid:.2f}</span></td>
@@ -1921,7 +1916,7 @@ def students_page(new_name: str = Query("")):
     if rows:
         table_html = f"""<div style="overflow-x:auto;">
   <table>
-    <thead><tr><th>Student</th><th>Rate</th><th>Lesson</th><th>Focus</th><th>Prepaid</th><th>Invoice Balance</th><th></th></tr></thead>
+    <thead><tr><th>Student</th><th>Lesson Fee</th><th>Duration</th><th>Focus</th><th>Prepaid</th><th>Invoice Balance</th><th></th></tr></thead>
     <tbody>{rows}</tbody>
   </table>
 </div>"""
@@ -2160,13 +2155,12 @@ def record_attendance(
         "cancelled": "Lesson Cancelled",
     }
 
-    # Confirmed and missed both charge the full lesson fee; cancelled is free
+    # Confirmed and missed both charge the flat lesson fee; cancelled is free
     charge = 0.0
     if status in ("confirmed", "missed"):
         profiles = get_all_profiles()
         profile  = profiles.get(student_name, {})
-        hourly   = float(profile.get('rate', 50))
-        charge   = round(hourly * duration_minutes / 60, 2)
+        charge   = round(float(profile.get('rate', 50)), 2)
         # Deduct from prepaid balance (can go negative)
         profile['prepaid'] = round(float(profile.get('prepaid', 0)) - charge, 2)
         profiles[student_name] = profile
@@ -2193,18 +2187,16 @@ def rates_page():
     tiers = get_pricing_tiers()
     rows = ""
     for name, data in tiers.items():
-        per_lesson = round(data['rate'] * data['minutes'] / 60, 2)
         rows += f"""<tr>
   <td><strong>{name}</strong></td>
-  <td>${data['rate']:.2f}/hr</td>
   <td>{data['minutes']} min</td>
-  <td style="color:var(--success);font-weight:600;">${per_lesson:.2f}/lesson</td>
+  <td style="color:var(--success);font-weight:600;">${data['rate']:.2f}</td>
 </tr>"""
 
     if rows:
         table_html = f"""<div style="overflow-x:auto;">
   <table>
-    <thead><tr><th>Tier Name</th><th>Hourly Rate</th><th>Duration</th><th>Per Lesson</th></tr></thead>
+    <thead><tr><th>Tier Name</th><th>Duration</th><th>Lesson Fee</th></tr></thead>
     <tbody>{rows}</tbody>
   </table>
 </div>"""
@@ -2212,7 +2204,7 @@ def rates_page():
         table_html = """<div class="empty-state">
   <div class="empty-state-icon">💰</div>
   <h3>No pricing tiers yet</h3>
-  <p>Create a tier (e.g. "1 Hour Standard" at $50/hr) to assign rates to students.</p>
+  <p>Create a tier (e.g. "60 min Standard" at $60/lesson) to assign rates to students.</p>
 </div>"""
 
     content = f"""
@@ -2228,11 +2220,11 @@ def rates_page():
     <form action="/save-pricing-tier" method="post">
       <div class="form-group">
         <label class="form-label">Tier Name</label>
-        <input type="text" name="tier_name" placeholder="e.g. 1 Hour Standard" required>
+        <input type="text" name="tier_name" placeholder="e.g. 60 min Standard" required>
       </div>
       <div class="form-group">
-        <label class="form-label">Hourly Rate ($)</label>
-        <input type="number" step="0.01" name="hourly_rate" placeholder="50.00" required>
+        <label class="form-label">Lesson Fee ($)</label>
+        <input type="number" step="0.01" name="hourly_rate" placeholder="60.00" required>
       </div>
       <div class="form-group">
         <label class="form-label">Duration (minutes)</label>
@@ -4113,8 +4105,7 @@ async def mobile_record_attendance(request: Request):
         return JSONResponse({"ok": False, "error": "Student not found"}, status_code=404)
 
     profile = profiles[student_name]
-    hourly  = float(profile.get("rate", 50))
-    charge  = round(hourly * duration_mins / 60, 2) if status in ("confirmed", "missed") else 0.0
+    charge  = round(float(profile.get("rate", 50)), 2) if status in ("confirmed", "missed") else 0.0
 
     if charge:
         profile["prepaid"] = round(float(profile.get("prepaid", 0)) - charge, 2)
@@ -4134,7 +4125,7 @@ async def mobile_record_attendance(request: Request):
 
 # ─── Stripe Connect — Teacher Onboarding & Parent Payments ────────────────────
 
-CONVENIENCE_FEE_CENTS = 300  # $3.00 flat fee charged to parent
+CONVENIENCE_FEE_CENTS = 400  # $4.00 flat fee charged to parent — covers Stripe processing
 
 def _get_teacher_user(email: str) -> dict | None:
     return next((u for u in get_all_users() if u.get("email") == email and u.get("role") in ("admin", "teacher")), None)

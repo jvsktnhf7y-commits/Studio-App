@@ -114,7 +114,7 @@ export default function AttendanceScreen({ route, navigation }) {
       <Card style={styles.infoCard}>
         <Text style={styles.studentName}>{lesson.student_name}</Text>
         <Text style={styles.meta}>
-          {lesson.duration_minutes || 60} min  ·  ${lesson.rate}/hr
+          {lesson.duration_minutes || 60} min  ·  ${lesson.rate}/lesson
         </Text>
         <View style={[styles.balancePill, { backgroundColor: balanceBg }]}>
           <Text style={[styles.balanceText, { color: balanceColor }]}>

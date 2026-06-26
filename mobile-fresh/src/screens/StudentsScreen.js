@@ -67,7 +67,7 @@ export default function StudentsScreen({ navigation }) {
             <Avatar name={item.name} />
             <View style={styles.cardInfo}>
               <Text style={styles.name}>{item.name}</Text>
-              <Text style={styles.tier}>{item.tier || 'No tier'} · ${item.rate}/hr</Text>
+              <Text style={styles.tier}>{item.tier || 'No tier'} · ${item.rate}/lesson</Text>
             </View>
             <BalanceChip balance={balance} />
           </View>

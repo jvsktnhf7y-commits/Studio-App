@@ -111,7 +111,7 @@ export default function StudentProfileScreen({ route, navigation }) {
       {/* Header card */}
       <LinearGradient colors={GRADIENT} style={styles.heroCard} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
         <Text style={styles.heroName}>{data.name}</Text>
-        <Text style={styles.heroTier}>{data.tier || 'No tier'} · ${data.rate}/hr</Text>
+        <Text style={styles.heroTier}>{data.tier || 'No tier'} · ${data.rate}/lesson</Text>
         <View style={styles.heroBalanceRow}>
           <Text style={styles.heroBalanceLabel}>Balance</Text>
           <Text style={[styles.heroBalance, { color: balance < 0 ? '#fc8181' : '#68d391' }]}>
