@@ -293,27 +293,18 @@ def page(title: str, content: str, active: str = "dashboard") -> str:
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css?v=4">
 <style>
-#mobileNav{{position:fixed;top:0;left:0;width:100%;height:100%;background:#0f172a;z-index:9999;display:flex;flex-direction:column;overflow-y:auto;visibility:hidden;pointer-events:none;}}
-#mobileNav.open{{visibility:visible;pointer-events:auto;}}
-.mobile-nav-header{{display:flex;align-items:center;justify-content:space-between;padding:20px 20px 16px;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;}}
-.mobile-nav-title{{color:#fff;font-size:17px;font-weight:700;}}
-.mobile-nav-close{{background:none;border:none;color:rgba(255,255,255,.7);font-size:32px;cursor:pointer;padding:0;line-height:1;}}
-.mobile-nav-links{{padding:16px 12px;flex:1;overflow-y:auto;}}
-.mobile-nav-links a{{display:flex;align-items:center;gap:14px;padding:15px 16px;border-radius:12px;text-decoration:none;color:rgba(255,255,255,.6);font-size:16px;font-weight:500;margin-bottom:4px;}}
-.mobile-nav-links a.active{{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;}}
-.mobile-nav-icon{{font-size:20px;width:24px;text-align:center;}}
 @media(max-width:768px){{.menu-btn{{display:block!important;}}.main{{margin-left:0!important;}}.sidebar{{display:none!important;}}}}
 </style>
 </head>
 <body>
-<div id="mobileNav">
-  <div class="mobile-nav-header">
-    <span class="mobile-nav-title">🎵 Studio Console</span>
-    <button class="mobile-nav-close" onclick="closeMobileNav()">✕</button>
+<div id="mn" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:#0f172a;z-index:9999;flex-direction:column;overflow-y:auto;">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:20px;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;">
+    <span style="color:#fff;font-size:17px;font-weight:700;">🎵 Studio Console</span>
+    <button onclick="document.getElementById('mn').style.display='none'" style="background:none;border:none;color:rgba(255,255,255,.7);font-size:36px;cursor:pointer;padding:0;line-height:1;">✕</button>
   </div>
-  <nav class="mobile-nav-links">
-    {"".join('<a href="' + href + '" class="' + ("active" if k==active else "") + '"><span class="mobile-nav-icon">' + icon + '</span>' + label + '</a>' for k,href,icon,label in links)}
-    <a href="/logout"><span class="mobile-nav-icon">🚪</span>Logout</a>
+  <nav style="padding:16px 12px;flex:1;overflow-y:auto;">
+    {"".join('<a href="' + href + '" style="display:flex;align-items:center;gap:14px;padding:15px 16px;border-radius:12px;text-decoration:none;color:' + ('rgba(255,255,255,1)' if k==active else 'rgba(255,255,255,.6)') + ';font-size:16px;font-weight:' + ('700' if k==active else '500') + ';margin-bottom:4px;background:' + ('linear-gradient(135deg,#6366f1,#8b5cf6)' if k==active else 'transparent') + '"><span style="font-size:20px;width:24px;text-align:center;">' + icon + '</span>' + label + '</a>' for k,href,icon,label in links)}
+    <a href="/logout" style="display:flex;align-items:center;gap:14px;padding:15px 16px;border-radius:12px;text-decoration:none;color:rgba(255,255,255,.6);font-size:16px;font-weight:500;margin-bottom:4px;"><span style="font-size:20px;width:24px;text-align:center;">🚪</span>Logout</a>
   </nav>
 </div>
 <div class="layout">
@@ -335,7 +326,7 @@ def page(title: str, content: str, active: str = "dashboard") -> str:
 <div class="main">
   <header class="topbar">
     <div style="display:flex;align-items:center;gap:10px;">
-      <button class="menu-btn" onclick="openMobileNav()">☰</button>
+      <button class="menu-btn" onclick="document.getElementById('mn').style.display='flex'">☰</button>
       <span class="topbar-title">{title}</span>
     </div>
   </header>
@@ -344,10 +335,6 @@ def page(title: str, content: str, active: str = "dashboard") -> str:
 </div>
 <div class="toast-container" id="toastContainer"></div>
 <script>
-function openMobileNav(){{var n=document.getElementById('mobileNav');if(n){{n.classList.add('open');document.body.style.overflow='hidden';}}}}
-function closeMobileNav(){{var n=document.getElementById('mobileNav');if(n){{n.classList.remove('open');document.body.style.overflow='';}}}}
-function openSidebar(){{openMobileNav();}}
-function closeSidebar(){{closeMobileNav();}}
 function showToast(msg, type){{
   var icons = {{success:'✅',error:'❌',info:'💬'}};
   var t = document.createElement('div');
@@ -491,27 +478,18 @@ def portal_page(title: str, content: str, active: str, nav_links: list,
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css?v=4">
 <style>
-#mobileNav{{position:fixed;top:0;left:0;width:100%;height:100%;background:#0f172a;z-index:9999;display:flex;flex-direction:column;overflow-y:auto;visibility:hidden;pointer-events:none;}}
-#mobileNav.open{{visibility:visible;pointer-events:auto;}}
-.mobile-nav-header{{display:flex;align-items:center;justify-content:space-between;padding:20px 20px 16px;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;}}
-.mobile-nav-title{{color:#fff;font-size:17px;font-weight:700;}}
-.mobile-nav-close{{background:none;border:none;color:rgba(255,255,255,.7);font-size:32px;cursor:pointer;padding:0;line-height:1;}}
-.mobile-nav-links{{padding:16px 12px;flex:1;overflow-y:auto;}}
-.mobile-nav-links a{{display:flex;align-items:center;gap:14px;padding:15px 16px;border-radius:12px;text-decoration:none;color:rgba(255,255,255,.6);font-size:16px;font-weight:500;margin-bottom:4px;}}
-.mobile-nav-links a.active{{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;}}
-.mobile-nav-icon{{font-size:20px;width:24px;text-align:center;}}
 @media(max-width:768px){{.menu-btn{{display:block!important;}}.main{{margin-left:0!important;}}.sidebar{{display:none!important;}}}}
 </style>
 </head>
 <body>
-<div id="mobileNav">
-  <div class="mobile-nav-header">
-    <span class="mobile-nav-title">🎵 Studio Console</span>
-    <button class="mobile-nav-close" onclick="closeMobileNav()">✕</button>
+<div id="mn" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:#0f172a;z-index:9999;flex-direction:column;overflow-y:auto;">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:20px;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;">
+    <span style="color:#fff;font-size:17px;font-weight:700;">🎵 Studio Console</span>
+    <button onclick="document.getElementById('mn').style.display='none'" style="background:none;border:none;color:rgba(255,255,255,.7);font-size:36px;cursor:pointer;padding:0;line-height:1;">✕</button>
   </div>
-  <nav class="mobile-nav-links">
-    {"".join('<a href="' + href + '" class="' + ("active" if k==active else "") + '"><span class="mobile-nav-icon">' + icon + '</span>' + label + '</a>' for k,href,icon,label in nav_links)}
-    <a href="{logout_url}"><span class="mobile-nav-icon">🚪</span>Logout</a>
+  <nav style="padding:16px 12px;flex:1;overflow-y:auto;">
+    {"".join('<a href="' + href + '" style="display:flex;align-items:center;gap:14px;padding:15px 16px;border-radius:12px;text-decoration:none;color:' + ('rgba(255,255,255,1)' if k==active else 'rgba(255,255,255,.6)') + ';font-size:16px;font-weight:' + ('700' if k==active else '500') + ';margin-bottom:4px;background:' + ('linear-gradient(135deg,#6366f1,#8b5cf6)' if k==active else 'transparent') + '"><span style="font-size:20px;width:24px;text-align:center;">' + icon + '</span>' + label + '</a>' for k,href,icon,label in nav_links)}
+    <a href="{logout_url}" style="display:flex;align-items:center;gap:14px;padding:15px 16px;border-radius:12px;text-decoration:none;color:rgba(255,255,255,.6);font-size:16px;font-weight:500;"><span style="font-size:20px;width:24px;text-align:center;">🚪</span>Logout</a>
   </nav>
 </div>
 <div class="layout">
@@ -533,7 +511,7 @@ def portal_page(title: str, content: str, active: str, nav_links: list,
 <div class="main">
   <header class="topbar">
     <div style="display:flex;align-items:center;gap:10px;">
-      <button class="menu-btn" onclick="openMobileNav()">☰</button>
+      <button class="menu-btn" onclick="document.getElementById('mn').style.display='flex'">☰</button>
       <span class="topbar-title">{title}</span>
     </div>
   </header>
@@ -542,10 +520,6 @@ def portal_page(title: str, content: str, active: str, nav_links: list,
 </div>
 <div class="toast-container" id="toastContainer"></div>
 <script>
-function openMobileNav(){{var n=document.getElementById('mobileNav');if(n){{n.classList.add('open');document.body.style.overflow='hidden';}}}}
-function closeMobileNav(){{var n=document.getElementById('mobileNav');if(n){{n.classList.remove('open');document.body.style.overflow='';}}}}
-function openSidebar(){{openMobileNav();}}
-function closeSidebar(){{closeMobileNav();}}
 function showToast(msg,type){{
   var icons={{success:'✅',error:'❌',info:'💬'}};
   var t=document.createElement('div');
