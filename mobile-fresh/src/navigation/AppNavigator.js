@@ -56,10 +56,10 @@ const MORE_ITEMS = [
   { label: 'Stripe Payments',    icon: '💳', screen: 'StripeConnect' },
 ];
 
+function MorePlaceholder() { return <View style={{ flex: 1, backgroundColor: COLORS.bg }} />; }
+
 function TeacherTabs({ navigation }) {
   const [showMore, setShowMore] = useState(false);
-
-  function MorePlaceholder() { return <View style={{ flex: 1, backgroundColor: COLORS.bg }} />; }
 
   return (
     <>
