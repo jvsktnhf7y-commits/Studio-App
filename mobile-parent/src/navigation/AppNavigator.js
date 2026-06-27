@@ -15,7 +15,7 @@ import { COLORS } from '../theme';
 const Stack = createNativeStackNavigator();
 const Tab   = createBottomTabNavigator();
 
-const STRIPE_PK = 'pk_live_YOUR_PUBLISHABLE_KEY'; // replace after Stripe Connect is set up
+const STRIPE_PK = 'pk_test_51TiPs2C4vwE62RZDV0PMKClgT35K7BwAEJI9Oof3m7FVf8DuwgCG2BxbWQdXDBlDnWRhcaO1bYG4hdGDLJd7QVxQ0032CpqnPE';
 
 function TabIcon({ label, focused }) {
   const icons = { Home: '🏠', Notes: '📝', Pay: '💳' };
