@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Text, TouchableOpacity, View, Modal, StyleSheet } from 'react-native';
 
 import * as Notifications from 'expo-notifications';
 
@@ -17,7 +17,6 @@ import LessonNoteScreen      from '../screens/LessonNoteScreen';
 import TeacherPaymentScreen  from '../screens/PaymentScreen';
 import OnboardingScreen      from '../screens/OnboardingScreen';
 import StripeConnectScreen   from '../screens/StripeConnectScreen';
-import MoreScreen            from '../screens/MoreScreen';
 
 import ParentLoginScreen     from '../screens/parent/LoginScreen';
 import ParentDashboard       from '../screens/parent/DashboardScreen';
@@ -48,26 +47,68 @@ const TAB_BAR_STYLE = {
 const TAB_LABEL_STYLE = { fontSize: 11, fontWeight: '600', marginTop: 2 };
 const HEADER_STYLE = { backgroundColor: '#fff', borderBottomWidth: 0, elevation: 0, shadowOpacity: 0 };
 
+const MORE_ITEMS = [
+  { label: 'Onboarding / Setup', icon: '🚀', screen: 'Onboarding' },
+  { label: 'Stripe Payments',    icon: '💳', screen: 'StripeConnect' },
+];
+
 function TeacherTabs({ navigation }) {
+  const [showMore, setShowMore] = useState(false);
+
+  function MorePlaceholder() { return <View style={{ flex: 1, backgroundColor: COLORS.bg }} />; }
+
   return (
-    <Tab.Navigator screenOptions={({ route }) => ({
-      tabBarIcon: ({ focused }) => {
-        const icons = { Today: '📅', Schedule: '🗓️', Students: '👥', Payments: '💳', More: '⋯' };
-        return <Text style={{ fontSize: focused ? 22 : 19, opacity: focused ? 1 : 0.5 }}>{icons[route.name]}</Text>;
-      },
-      tabBarActiveTintColor: COLORS.primary, tabBarInactiveTintColor: COLORS.muted,
-      tabBarLabelStyle: TAB_LABEL_STYLE,
-      tabBarStyle: TAB_BAR_STYLE,
-      headerStyle: HEADER_STYLE,
-      headerTitleStyle: { color: COLORS.text, fontWeight: '800', fontSize: 19 },
-      headerTintColor: COLORS.text,
-    })}>
-      <Tab.Screen name="Today"    component={DashboardScreen}      options={{ title: "Today's Lessons" }} />
-      <Tab.Screen name="Schedule" component={ScheduleScreen}       options={{ title: 'Schedule' }} />
-      <Tab.Screen name="Students" component={StudentsScreen}       options={{ title: 'Students' }} />
-      <Tab.Screen name="Payments" component={TeacherPaymentScreen} options={{ title: 'Payments' }} />
-      <Tab.Screen name="More"     component={MoreScreen}           options={{ title: 'More' }} />
-    </Tab.Navigator>
+    <>
+      <Tab.Navigator screenOptions={({ route }) => ({
+        tabBarIcon: ({ focused }) => {
+          const icons = { Today: '📅', Schedule: '🗓️', Students: '👥', Payments: '💳', More: '⋯' };
+          return <Text style={{ fontSize: focused ? 22 : 20, opacity: focused ? 1 : 0.5 }}>{icons[route.name]}</Text>;
+        },
+        tabBarActiveTintColor: COLORS.primary, tabBarInactiveTintColor: COLORS.muted,
+        tabBarLabelStyle: TAB_LABEL_STYLE,
+        tabBarStyle: TAB_BAR_STYLE,
+        headerStyle: HEADER_STYLE,
+        headerTitleStyle: { color: COLORS.text, fontWeight: '800', fontSize: 19 },
+        headerTintColor: COLORS.text,
+      })}>
+        <Tab.Screen name="Today"    component={DashboardScreen}      options={{ title: "Today's Lessons" }} />
+        <Tab.Screen name="Schedule" component={ScheduleScreen}       options={{ title: 'Schedule' }} />
+        <Tab.Screen name="Students" component={StudentsScreen}       options={{ title: 'Students' }} />
+        <Tab.Screen name="Payments" component={TeacherPaymentScreen} options={{ title: 'Payments' }} />
+        <Tab.Screen
+          name="More"
+          component={MorePlaceholder}
+          options={{ title: 'More' }}
+          listeners={{ tabPress: e => { e.preventDefault(); setShowMore(true); } }}
+        />
+      </Tab.Navigator>
+
+      <Modal visible={showMore} transparent animationType="fade" onRequestClose={() => setShowMore(false)}>
+        <TouchableOpacity style={moreStyles.backdrop} activeOpacity={1} onPress={() => setShowMore(false)} />
+        <View style={moreStyles.sheet}>
+          {MORE_ITEMS.map(item => (
+            <TouchableOpacity
+              key={item.screen}
+              style={moreStyles.item}
+              onPress={() => { setShowMore(false); navigation.navigate(item.screen); }}
+            >
+              <Text style={moreStyles.itemIcon}>{item.icon}</Text>
+              <Text style={moreStyles.itemLabel}>{item.label}</Text>
+              <Text style={moreStyles.chevron}>›</Text>
+            </TouchableOpacity>
+          ))}
+          <View style={moreStyles.divider} />
+          <TouchableOpacity
+            style={moreStyles.item}
+            onPress={async () => { setShowMore(false); await logout(); navigation.replace('RoleSelect'); }}
+          >
+            <Text style={moreStyles.itemIcon}>🚪</Text>
+            <Text style={[moreStyles.itemLabel, { color: COLORS.danger }]}>Log out</Text>
+            <Text style={[moreStyles.chevron, { color: COLORS.danger }]}>›</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+    </>
   );
 }
 
@@ -176,3 +217,13 @@ export default function AppNavigator() {
     </NavigationContainer>
   );
 }
+
+const moreStyles = StyleSheet.create({
+  backdrop:  { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
+  sheet:     { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingVertical: 12, paddingHorizontal: 8, paddingBottom: 36 },
+  item:      { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16, borderRadius: 12 },
+  itemIcon:  { fontSize: 22, width: 28, textAlign: 'center' },
+  itemLabel: { flex: 1, fontSize: 16, fontWeight: '600', color: '#18181b' },
+  chevron:   { fontSize: 22, color: '#a1a1aa' },
+  divider:   { height: 1, backgroundColor: '#e4e4e7', marginVertical: 6, marginHorizontal: 8 },
+});
