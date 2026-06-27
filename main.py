@@ -265,16 +265,12 @@ def page(title: str, content: str, active: str = "dashboard") -> str:
     """Render a full page with the dark sidebar layout."""
     links = [
         ("dashboard", "/dashboard",  "🏠", "Dashboard"),
-        ("students",  "/students",   "👥", "Students"),
-        ("rates",     "/rates",      "💰", "Rates"),
-        ("payments",  "/payments",   "💳", "Payments"),
         ("schedule",  "/schedule",   "📅", "Schedule"),
-        ("invoices",  "/invoices",   "🧾", "Invoices"),
-        ("analytics", "/analytics",  "📈", "Analytics"),
-        ("beta-stats", "/beta-analytics", "🧪", "Beta Stats"),
+        ("students",  "/students",   "👥", "Students"),
+        ("payments",  "/payments",   "💳", "Payments"),
         ("settings",  "/settings",   "⚙️",  "Settings"),
+        ("billing",   "/billing",    "🧾", "Billing"),
         ("admin",     "/admin",      "🔐", "Admin"),
-        ("billing",   "/billing",    "💳", "Billing"),
     ]
     nav_html = "".join(
         f'<a href="{href}" class="nav-link{" active" if k == active else ""}">'
@@ -521,9 +517,7 @@ def parent_page(title: str, content: str, active: str = "", student_name: str = 
     return portal_page(title, content, active, [
         ("dashboard", "/parent/dashboard", "🏠", "Dashboard"),
         ("notes",     "/parent/notes",     "📝", "Lesson Notes"),
-        ("invoices",  "/parent/invoices",  "🧾", "Invoices"),
-        ("payments",  "/parent/payments",  "💳", "Payments"),
-        ("balance",   "/parent/balance",   "💰", "Balance"),
+        ("payments",  "/parent/payments",  "💳", "Payments & Balance"),
     ], "/parent/logout", badge)
 
 

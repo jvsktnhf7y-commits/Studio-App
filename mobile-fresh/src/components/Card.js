@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
-import { SHADOW_SM } from '../theme';
+import { COLORS, SHADOW_CARD } from '../theme';
 
 export default function Card({ children, style }) {
   return <View style={[styles.card, style]}>{children}</View>;
@@ -8,10 +8,12 @@ export default function Card({ children, style }) {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
+    backgroundColor: COLORS.white,
+    borderRadius: 18,
     padding: 16,
     marginBottom: 12,
-    ...SHADOW_SM,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    ...SHADOW_CARD,
   },
 });
