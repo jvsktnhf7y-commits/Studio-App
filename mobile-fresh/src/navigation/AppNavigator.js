@@ -3,7 +3,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
-import { StripeProvider } from '@stripe/stripe-react-native';
+
 import * as Notifications from 'expo-notifications';
 
 import RoleSelectScreen      from '../screens/RoleSelectScreen';
@@ -17,6 +17,7 @@ import LessonNoteScreen      from '../screens/LessonNoteScreen';
 import TeacherPaymentScreen  from '../screens/PaymentScreen';
 import OnboardingScreen      from '../screens/OnboardingScreen';
 import StripeConnectScreen   from '../screens/StripeConnectScreen';
+import MoreScreen            from '../screens/MoreScreen';
 
 import ParentLoginScreen     from '../screens/parent/LoginScreen';
 import ParentDashboard       from '../screens/parent/DashboardScreen';
@@ -33,32 +34,39 @@ import { COLORS } from '../theme';
 const Stack = createNativeStackNavigator();
 const Tab   = createBottomTabNavigator();
 
-const STRIPE_PK = 'pk_test_51TiPs2C4vwE62RZDV0PMKClgT35K7BwAEJI9Oof3m7FVf8DuwgCG2BxbWQdXDBlDnWRhcaO1bYG4hdGDLJd7QVxQ0032CpqnPE';
 
 Notifications.setNotificationHandler({ handleNotification: async () => ({ shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false }) });
+
+const TAB_BAR_STYLE = {
+  backgroundColor: '#fff',
+  borderTopColor: COLORS.border,
+  borderTopWidth: 1,
+  height: 82,
+  paddingTop: 8,
+  paddingBottom: 16,
+};
+const TAB_LABEL_STYLE = { fontSize: 11, fontWeight: '600', marginTop: 2 };
+const HEADER_STYLE = { backgroundColor: '#fff', borderBottomWidth: 0, elevation: 0, shadowOpacity: 0 };
 
 function TeacherTabs({ navigation }) {
   return (
     <Tab.Navigator screenOptions={({ route }) => ({
       tabBarIcon: ({ focused }) => {
-        const icons = { Today: '📅', Schedule: '🗓️', Students: '👥', Payments: '💳' };
+        const icons = { Today: '📅', Schedule: '🗓️', Students: '👥', Payments: '💳', More: '⋯' };
         return <Text style={{ fontSize: focused ? 22 : 19, opacity: focused ? 1 : 0.5 }}>{icons[route.name]}</Text>;
       },
       tabBarActiveTintColor: COLORS.primary, tabBarInactiveTintColor: COLORS.muted,
-      tabBarLabelStyle: { fontSize: 12, fontWeight: '600', marginBottom: 4 },
-      tabBarStyle: { backgroundColor: '#fff', borderTopColor: COLORS.border, borderTopWidth: 1, height: 62, paddingTop: 6 },
-      headerStyle: { backgroundColor: '#fff', borderBottomWidth: 0, elevation: 0, shadowOpacity: 0 },
+      tabBarLabelStyle: TAB_LABEL_STYLE,
+      tabBarStyle: TAB_BAR_STYLE,
+      headerStyle: HEADER_STYLE,
       headerTitleStyle: { color: COLORS.text, fontWeight: '800', fontSize: 19 },
       headerTintColor: COLORS.text,
     })}>
-      <Tab.Screen name="Today"    component={DashboardScreen}      options={{ title: "Today's Lessons", headerRight: () => (
-        <TouchableOpacity onPress={async () => { await logout(); navigation.replace('RoleSelect'); }} style={{ marginRight: 16 }}>
-          <Text style={{ color: COLORS.primary, fontWeight: '600', fontSize: 15 }}>Logout</Text>
-        </TouchableOpacity>
-      )}} />
+      <Tab.Screen name="Today"    component={DashboardScreen}      options={{ title: "Today's Lessons" }} />
       <Tab.Screen name="Schedule" component={ScheduleScreen}       options={{ title: 'Schedule' }} />
       <Tab.Screen name="Students" component={StudentsScreen}       options={{ title: 'Students' }} />
-      <Tab.Screen name="Payments" component={TeacherPaymentScreen} options={{ title: 'Log Payment' }} />
+      <Tab.Screen name="Payments" component={TeacherPaymentScreen} options={{ title: 'Payments' }} />
+      <Tab.Screen name="More"     component={MoreScreen}           options={{ title: 'More' }} />
     </Tab.Navigator>
   );
 }
@@ -71,9 +79,9 @@ function ParentTabs({ navigation }) {
         return <Text style={{ fontSize: focused ? 22 : 19, opacity: focused ? 1 : 0.5 }}>{icons[route.name]}</Text>;
       },
       tabBarActiveTintColor: '#667eea', tabBarInactiveTintColor: COLORS.muted,
-      tabBarLabelStyle: { fontSize: 12, fontWeight: '600', marginBottom: 4 },
-      tabBarStyle: { backgroundColor: '#fff', borderTopColor: COLORS.border, borderTopWidth: 1, height: 62, paddingTop: 6 },
-      headerStyle: { backgroundColor: '#fff', borderBottomWidth: 0, elevation: 0, shadowOpacity: 0 },
+      tabBarLabelStyle: TAB_LABEL_STYLE,
+      tabBarStyle: TAB_BAR_STYLE,
+      headerStyle: HEADER_STYLE,
       headerTitleStyle: { color: COLORS.text, fontWeight: '800', fontSize: 19 },
       headerTintColor: COLORS.text,
     })}>
@@ -83,7 +91,7 @@ function ParentTabs({ navigation }) {
         </TouchableOpacity>
       )}} />
       <Tab.Screen name="Notes" component={ParentNotes}   options={{ title: 'Lesson Notes' }} />
-      <Tab.Screen name="Pay"   component={ParentPayment} options={{ title: 'Make a Payment' }} />
+      <Tab.Screen name="Pay"   component={ParentPayment} options={{ title: 'Payments' }} />
     </Tab.Navigator>
   );
 }
@@ -96,9 +104,9 @@ function StudentTabs({ navigation }) {
         return <Text style={{ fontSize: focused ? 22 : 19, opacity: focused ? 1 : 0.5 }}>{icons[route.name]}</Text>;
       },
       tabBarActiveTintColor: '#48bb78', tabBarInactiveTintColor: COLORS.muted,
-      tabBarLabelStyle: { fontSize: 12, fontWeight: '600', marginBottom: 4 },
-      tabBarStyle: { backgroundColor: '#fff', borderTopColor: COLORS.border, borderTopWidth: 1, height: 62, paddingTop: 6 },
-      headerStyle: { backgroundColor: '#fff', borderBottomWidth: 0, elevation: 0, shadowOpacity: 0 },
+      tabBarLabelStyle: TAB_LABEL_STYLE,
+      tabBarStyle: TAB_BAR_STYLE,
+      headerStyle: HEADER_STYLE,
       headerTitleStyle: { color: COLORS.text, fontWeight: '800', fontSize: 19 },
       headerTintColor: COLORS.text,
     })}>
@@ -142,31 +150,29 @@ export default function AppNavigator() {
   }
 
   return (
-    <StripeProvider publishableKey={STRIPE_PK}>
-      <NavigationContainer>
-        <Stack.Navigator initialRouteName={initialRoute} screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="RoleSelect" component={RoleSelectScreen} />
+    <NavigationContainer>
+      <Stack.Navigator initialRouteName={initialRoute} screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="RoleSelect" component={RoleSelectScreen} />
 
-          <Stack.Screen name="Login" children={(props) => {
-            const r = props.route?.params?.role || role;
-            if (r === 'parent')  return <ParentLoginScreen  {...props} />;
-            if (r === 'student') return <StudentLoginScreen {...props} />;
-            return <TeacherLoginScreen {...props} />;
-          }} />
+        <Stack.Screen name="Login" children={(props) => {
+          const r = props.route?.params?.role || role;
+          if (r === 'parent')  return <ParentLoginScreen  {...props} />;
+          if (r === 'student') return <StudentLoginScreen {...props} />;
+          return <TeacherLoginScreen {...props} />;
+        }} />
 
-          <Stack.Screen name="Main" children={(props) => {
-            if (role === 'parent')  return <ParentTabs  {...props} />;
-            if (role === 'student') return <StudentTabs {...props} />;
-            return <TeacherTabs {...props} />;
-          }} />
+        <Stack.Screen name="Main" children={(props) => {
+          if (role === 'parent')  return <ParentTabs  {...props} />;
+          if (role === 'student') return <StudentTabs {...props} />;
+          return <TeacherTabs {...props} />;
+        }} />
 
-          <Stack.Screen name="Onboarding"     component={OnboardingScreen}     options={{ gestureEnabled: false }} />
-          <Stack.Screen name="StudentProfile" component={StudentProfileScreen} options={{ headerShown: true, title: '' }} />
-          <Stack.Screen name="Attendance"     component={AttendanceScreen}     options={{ headerShown: true, title: 'Record Attendance' }} />
-          <Stack.Screen name="LessonNote"     component={LessonNoteScreen}     options={{ headerShown: true, title: 'Lesson Note' }} />
-          <Stack.Screen name="StripeConnect"  component={StripeConnectScreen}  options={{ headerShown: true, title: 'Accept Payments' }} />
-        </Stack.Navigator>
-      </NavigationContainer>
-    </StripeProvider>
+        <Stack.Screen name="Onboarding"     component={OnboardingScreen}     options={{ gestureEnabled: false }} />
+        <Stack.Screen name="StudentProfile" component={StudentProfileScreen} options={{ headerShown: true, title: '' }} />
+        <Stack.Screen name="Attendance"     component={AttendanceScreen}     options={{ headerShown: true, title: 'Record Attendance' }} />
+        <Stack.Screen name="LessonNote"     component={LessonNoteScreen}     options={{ headerShown: true, title: 'Lesson Note' }} />
+        <Stack.Screen name="StripeConnect"  component={StripeConnectScreen}  options={{ headerShown: true, title: 'Accept Payments' }} />
+      </Stack.Navigator>
+    </NavigationContainer>
   );
 }
