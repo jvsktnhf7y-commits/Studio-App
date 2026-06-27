@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Card from '../components/Card';
-import { getStudentProfile, setAccessCode } from '../services/api';
+import { getStudentProfile, setAccessCode, setParentCode } from '../services/api';
 import { COLORS, GRADIENT, SHADOW_SM } from '../theme';
 
 function formatDate(dateStr) {
@@ -36,13 +36,15 @@ export default function StudentProfileScreen({ route, navigation }) {
   const [loading,      setLoading]      = useState(true);
   const [refreshing,   setRefreshing]   = useState(false);
   const [accessCode,   setAccessCode_]  = useState('');
+  const [parentCode,   setParentCode_]  = useState('');
   const [savingCode,   setSavingCode]   = useState(false);
+  const [savingParent, setSavingParent] = useState(false);
 
   const load = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true);
     try {
       const res = await getStudentProfile(name);
-      if (res.ok) { setData(res); setAccessCode_(res.access_code || ''); }
+      if (res.ok) { setData(res); setAccessCode_(res.access_code || ''); setParentCode_(res.parent_code || ''); }
       else Alert.alert('Error', res.error || 'Failed to load profile.');
     } catch {
       Alert.alert('Error', 'Could not connect to server.');
@@ -96,7 +98,29 @@ export default function StudentProfileScreen({ route, navigation }) {
 
   async function handleShareCode() {
     if (!accessCode) return;
-    await Share.share({ message: `Your Studio Manager access code is: ${accessCode}` });
+    await Share.share({ message: `Your Maestro student access code is: ${accessCode}` });
+  }
+
+  async function handleGenerateParentCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const code = 'P-' + Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    setSavingParent(true);
+    try {
+      const res = await setParentCode(name, code);
+      if (res.ok) {
+        setParentCode_(res.code);
+        Alert.alert('Parent code set!', `Share this with ${name}'s parent:\n\n${res.code}`, [
+          { text: 'Share', onPress: () => Share.share({ message: `Maestro parent access code for ${name}: ${res.code}` }) },
+          { text: 'OK' },
+        ]);
+      }
+    } catch { Alert.alert('Error', 'Could not save parent code.'); }
+    finally { setSavingParent(false); }
+  }
+
+  async function handleShareParentCode() {
+    if (!parentCode) return;
+    await Share.share({ message: `Maestro parent access code for ${name}: ${parentCode}` });
   }
 
   const balance      = data.balance ?? 0;
@@ -198,6 +222,35 @@ export default function StudentProfileScreen({ route, navigation }) {
               <Text style={styles.codeSub}>Generate a code so {name} can log into the Student app</Text>
               <TouchableOpacity onPress={handleGenerateCode} disabled={savingCode} style={[styles.shareBtn, { marginTop: 12 }]} activeOpacity={0.8}>
                 <Text style={styles.shareBtnText}>{savingCode ? 'Generating...' : '✨  Generate Access Code'}</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </Card>
+      </View>
+
+      {/* Parent access code */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Parent App Access</Text>
+        <Card style={styles.codeCard}>
+          {parentCode ? (
+            <>
+              <Text style={styles.codeLabel}>Current parent code</Text>
+              <Text style={styles.codeValue}>{parentCode}</Text>
+              <View style={styles.codeButtons}>
+                <TouchableOpacity onPress={handleShareParentCode} style={styles.shareBtn} activeOpacity={0.8}>
+                  <Text style={styles.shareBtnText}>📤  Share Code</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={handleGenerateParentCode} disabled={savingParent} style={styles.regenBtn} activeOpacity={0.8}>
+                  <Text style={styles.regenBtnText}>{savingParent ? '...' : '🔄  New Code'}</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={styles.codeLabel}>No parent code set</Text>
+              <Text style={styles.codeSub}>Generate a code so {name}'s parent can log into the Parent app</Text>
+              <TouchableOpacity onPress={handleGenerateParentCode} disabled={savingParent} style={[styles.shareBtn, { marginTop: 12 }]} activeOpacity={0.8}>
+                <Text style={styles.shareBtnText}>{savingParent ? 'Generating...' : '✨  Generate Parent Code'}</Text>
               </TouchableOpacity>
             </>
           )}

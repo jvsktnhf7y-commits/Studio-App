@@ -2538,6 +2538,20 @@ async def mobile_set_access_code(student_name: str, request: Request):
     return JSONResponse({"ok": True, "code": code})
 
 
+@app.post("/api/mobile/student/{student_name}/parent-code")
+async def mobile_set_parent_code(student_name: str, request: Request):
+    data    = await request.json()
+    code    = data.get("code", "").strip().upper()
+    if not code:
+        return JSONResponse({"ok": False, "error": "code is required"}, status_code=400)
+    profiles = get_all_profiles()
+    if student_name not in profiles:
+        return JSONResponse({"ok": False, "error": "Student not found"}, status_code=404)
+    profiles[student_name]["parent_code"] = code
+    save_all_profiles(profiles)
+    return JSONResponse({"ok": True, "code": code})
+
+
 def _send_expo_push(token: str, title: str, body: str):
     try:
         import urllib.request, json as _json
@@ -4360,6 +4374,7 @@ def mobile_student_profile(student_name: str):
         "balance":      float(profile.get("prepaid", 0)),
         "target_minutes": int(profile.get("target_minutes", 60)),
         "access_code":  profile.get("access_code", ""),
+        "parent_code":  profile.get("parent_code", ""),
         "upcoming":     upcoming_list,
         "attendance":   attendance,
         "notes":        [{"date": n["date"], "notes": n["notes"], "assignment": n["assignment"]} for n in notes[:10]],
@@ -4419,25 +4434,24 @@ async def mobile_register_push(request: Request):
 
 @app.post("/api/mobile/parent/login")
 async def mobile_parent_login(request: Request):
-    data     = await request.json()
-    email    = data.get("email", "").strip().lower()
-    password = data.get("password", "")
-    pw_hash  = hashlib.sha256(password.encode()).hexdigest()
-    for user in get_all_users():
-        if user.get("email", "").lower() == email and user.get("password_hash") == pw_hash and user.get("role") == "parent":
-            student = user.get("linked_student", "")
-            return JSONResponse({"ok": True, "session": f"parent:{email}", "student_name": student, "email": email})
-    return JSONResponse({"ok": False, "error": "Invalid email or password"}, status_code=401)
+    data         = await request.json()
+    student_name = data.get("student_name", "").strip()
+    parent_code  = data.get("parent_code", "").strip().upper()
+    profiles     = get_all_profiles()
+    profile      = profiles.get(student_name, {})
+    stored       = profile.get("parent_code", "")
+    if not stored:
+        return JSONResponse({"ok": False, "error": "No parent code set. Ask your teacher to generate one."}, status_code=401)
+    if parent_code != stored:
+        return JSONResponse({"ok": False, "error": "Incorrect parent code"}, status_code=401)
+    session = f"parent:{student_name}"
+    return JSONResponse({"ok": True, "session": session, "student_name": student_name})
 
 
 @app.get("/api/mobile/parent/dashboard")
 def mobile_parent_dashboard(request: Request):
     auth         = request.headers.get("Authorization", "")
-    email        = auth.replace("Bearer parent:", "").strip()
-    user         = next((u for u in get_all_users() if u.get("email") == email and u.get("role") == "parent"), None)
-    if not user:
-        return JSONResponse({"ok": False, "error": "Not found"}, status_code=404)
-    student_name = user.get("linked_student", "")
+    student_name = auth.replace("Bearer parent:", "").strip()
     profile      = get_all_profiles().get(student_name, {})
     balance      = float(profile.get("prepaid", 0))
     upcoming     = get_upcoming_lessons_for_student(student_name, days=28)
@@ -4471,11 +4485,7 @@ def mobile_parent_dashboard(request: Request):
 @app.get("/api/mobile/parent/notes")
 def mobile_parent_notes(request: Request):
     auth         = request.headers.get("Authorization", "")
-    email        = auth.replace("Bearer parent:", "").strip()
-    user         = next((u for u in get_all_users() if u.get("email") == email and u.get("role") == "parent"), None)
-    if not user:
-        return JSONResponse({"ok": False, "error": "Not found"}, status_code=404)
-    student_name = user.get("linked_student", "")
+    student_name = auth.replace("Bearer parent:", "").strip()
     notes        = get_notes_for_student(student_name)
     return JSONResponse({"ok": True, "student_name": student_name, "notes": [
         {"date": n["date"], "notes": n["notes"], "assignment": n["assignment"]} for n in notes
