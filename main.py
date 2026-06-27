@@ -226,9 +226,18 @@ input:focus,select:focus,textarea:focus{border-color:var(--primary);box-shadow:0
 .login-wrap{min-height:100vh;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px;}
 .login-card{background:#fff;border-radius:18px;padding:36px;width:100%;max-width:390px;border:1px solid var(--border);box-shadow:0 8px 32px rgba(0,0,0,.08);}
 .login-logo{width:52px;height:52px;border-radius:13px;background:linear-gradient(135deg,var(--primary),var(--secondary));display:flex;align-items:center;justify-content:center;font-size:24px;margin:0 auto 18px;}
-.menu-btn{display:none;background:none;border:none;font-size:22px;cursor:pointer;color:var(--dark);padding:4px 8px;line-height:1;}
-.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:199;}
-.sidebar-overlay.open{display:block;}
+.menu-btn{display:none;background:none;border:none;font-size:24px;cursor:pointer;color:var(--dark);padding:4px 8px;line-height:1;z-index:300;}
+.mobile-nav{display:none;position:fixed;inset:0;background:var(--sidebar);z-index:400;flex-direction:column;overflow-y:auto;}
+.mobile-nav.open{display:flex;}
+.mobile-nav-header{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid rgba(255,255,255,.08);}
+.mobile-nav-title{color:#fff;font-size:16px;font-weight:700;}
+.mobile-nav-close{background:none;border:none;color:rgba(255,255,255,.6);font-size:28px;cursor:pointer;padding:0;}
+.mobile-nav-links{padding:12px 12px;flex:1;}
+.mobile-nav-links a{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:10px;text-decoration:none;color:rgba(255,255,255,.6);font-size:15px;font-weight:500;margin-bottom:4px;}
+.mobile-nav-links a:hover,.mobile-nav-links a.active{background:rgba(255,255,255,.08);color:#fff;}
+.mobile-nav-links a.active{background:linear-gradient(135deg,var(--primary),var(--secondary));color:#fff;}
+.mobile-nav-icon{font-size:18px;width:22px;text-align:center;}
+.sidebar-overlay{display:none;}
 @media(max-width:768px){
   .two-col,.three-col,.grid{grid-template-columns:1fr;}
   h1{font-size:18px;}
@@ -236,8 +245,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--primary);box-shadow:0
   .topbar{padding:0 14px;}
   .menu-btn{display:block;}
   .main{margin-left:0;}
-  .sidebar{transform:translateX(-100%);}
-  .sidebar.open{transform:translateX(0);}
+  .sidebar{display:none;}
 }
 .toast-container{position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:10px;pointer-events:none;}
 .toast{background:#1e293b;color:#fff;padding:12px 18px;border-radius:10px;font-size:13px;font-weight:500;box-shadow:0 4px 16px rgba(0,0,0,.18);display:flex;align-items:center;gap:10px;opacity:1;transform:translateY(0);transition:opacity .4s ease,transform .4s ease;pointer-events:auto;}
@@ -287,7 +295,16 @@ def page(title: str, content: str, active: str = "dashboard") -> str:
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<div class="sidebar-overlay" id="overlay" onclick="closeSidebar()"></div>
+<div id="mobileNav" class="mobile-nav">
+  <div class="mobile-nav-header">
+    <span class="mobile-nav-title">🎵 Studio Console</span>
+    <button class="mobile-nav-close" onclick="closeMobileNav()">✕</button>
+  </div>
+  <nav class="mobile-nav-links">
+    {"".join(f'<a href="{href}" class="{"active" if k==active else ""}"><span class="mobile-nav-icon">{icon}</span>{label}</a>' for k,href,icon,label in links)}
+    <a href="/logout"><span class="mobile-nav-icon">🚪</span>Logout</a>
+  </nav>
+</div>
 <div class="layout">
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-brand">
@@ -307,7 +324,7 @@ def page(title: str, content: str, active: str = "dashboard") -> str:
 <div class="main">
   <header class="topbar">
     <div style="display:flex;align-items:center;gap:10px;">
-      <button class="menu-btn" onclick="openSidebar()">☰</button>
+      <button class="menu-btn" onclick="openMobileNav()">☰</button>
       <span class="topbar-title">{title}</span>
     </div>
   </header>
@@ -316,8 +333,10 @@ def page(title: str, content: str, active: str = "dashboard") -> str:
 </div>
 <div class="toast-container" id="toastContainer"></div>
 <script>
-function openSidebar(){{document.getElementById('sidebar').classList.add('open');document.getElementById('overlay').classList.add('open');}}
-function closeSidebar(){{document.getElementById('sidebar').classList.remove('open');document.getElementById('overlay').classList.remove('open');}}
+function openMobileNav(){{document.getElementById('mobileNav').classList.add('open');document.body.style.overflow='hidden';}}
+function closeMobileNav(){{document.getElementById('mobileNav').classList.remove('open');document.body.style.overflow='';}}
+function openSidebar(){{openMobileNav();}}
+function closeSidebar(){{closeMobileNav();}}
 function showToast(msg, type){{
   var icons = {{success:'✅',error:'❌',info:'💬'}};
   var t = document.createElement('div');
@@ -462,7 +481,16 @@ def portal_page(title: str, content: str, active: str, nav_links: list,
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<div class="sidebar-overlay" id="overlay" onclick="closeSidebar()"></div>
+<div id="mobileNav" class="mobile-nav">
+  <div class="mobile-nav-header">
+    <span class="mobile-nav-title">🎵 Studio Console</span>
+    <button class="mobile-nav-close" onclick="closeMobileNav()">✕</button>
+  </div>
+  <nav class="mobile-nav-links">
+    {"".join(f'<a href="{href}" class="{"active" if k==active else ""}"><span class="mobile-nav-icon">{icon}</span>{label}</a>' for k,href,icon,label in nav_links)}
+    <a href="{logout_url}"><span class="mobile-nav-icon">🚪</span>Logout</a>
+  </nav>
+</div>
 <div class="layout">
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-brand">
@@ -482,7 +510,7 @@ def portal_page(title: str, content: str, active: str, nav_links: list,
 <div class="main">
   <header class="topbar">
     <div style="display:flex;align-items:center;gap:10px;">
-      <button class="menu-btn" onclick="openSidebar()">☰</button>
+      <button class="menu-btn" onclick="openMobileNav()">☰</button>
       <span class="topbar-title">{title}</span>
     </div>
   </header>
@@ -491,8 +519,10 @@ def portal_page(title: str, content: str, active: str, nav_links: list,
 </div>
 <div class="toast-container" id="toastContainer"></div>
 <script>
-function openSidebar(){{document.getElementById('sidebar').classList.add('open');document.getElementById('overlay').classList.add('open');}}
-function closeSidebar(){{document.getElementById('sidebar').classList.remove('open');document.getElementById('overlay').classList.remove('open');}}
+function openMobileNav(){{document.getElementById('mobileNav').classList.add('open');document.body.style.overflow='hidden';}}
+function closeMobileNav(){{document.getElementById('mobileNav').classList.remove('open');document.body.style.overflow='';}}
+function openSidebar(){{openMobileNav();}}
+function closeSidebar(){{closeMobileNav();}}
 function showToast(msg,type){{
   var icons={{success:'✅',error:'❌',info:'💬'}};
   var t=document.createElement('div');
