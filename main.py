@@ -291,16 +291,28 @@ def page(title: str, content: str, active: str = "dashboard") -> str:
 <title>{title} — Studio Console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=4">
+<style>
+#mobileNav{{position:fixed;top:0;left:0;width:100%;height:100%;background:#0f172a;z-index:9999;display:flex;flex-direction:column;overflow-y:auto;visibility:hidden;pointer-events:none;}}
+#mobileNav.open{{visibility:visible;pointer-events:auto;}}
+.mobile-nav-header{{display:flex;align-items:center;justify-content:space-between;padding:20px 20px 16px;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;}}
+.mobile-nav-title{{color:#fff;font-size:17px;font-weight:700;}}
+.mobile-nav-close{{background:none;border:none;color:rgba(255,255,255,.7);font-size:32px;cursor:pointer;padding:0;line-height:1;}}
+.mobile-nav-links{{padding:16px 12px;flex:1;overflow-y:auto;}}
+.mobile-nav-links a{{display:flex;align-items:center;gap:14px;padding:15px 16px;border-radius:12px;text-decoration:none;color:rgba(255,255,255,.6);font-size:16px;font-weight:500;margin-bottom:4px;}}
+.mobile-nav-links a.active{{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;}}
+.mobile-nav-icon{{font-size:20px;width:24px;text-align:center;}}
+@media(max-width:768px){{.menu-btn{{display:block!important;}}.main{{margin-left:0!important;}}.sidebar{{display:none!important;}}}}
+</style>
 </head>
 <body>
-<div id="mobileNav" class="mobile-nav">
+<div id="mobileNav">
   <div class="mobile-nav-header">
     <span class="mobile-nav-title">🎵 Studio Console</span>
     <button class="mobile-nav-close" onclick="closeMobileNav()">✕</button>
   </div>
   <nav class="mobile-nav-links">
-    {"".join(f'<a href="{href}" class="{"active" if k==active else ""}"><span class="mobile-nav-icon">{icon}</span>{label}</a>' for k,href,icon,label in links)}
+    {"".join('<a href="' + href + '" class="' + ("active" if k==active else "") + '"><span class="mobile-nav-icon">' + icon + '</span>' + label + '</a>' for k,href,icon,label in links)}
     <a href="/logout"><span class="mobile-nav-icon">🚪</span>Logout</a>
   </nav>
 </div>
@@ -477,16 +489,28 @@ def portal_page(title: str, content: str, active: str, nav_links: list,
 <title>{title} — Studio Console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=4">
+<style>
+#mobileNav{{position:fixed;top:0;left:0;width:100%;height:100%;background:#0f172a;z-index:9999;display:flex;flex-direction:column;overflow-y:auto;visibility:hidden;pointer-events:none;}}
+#mobileNav.open{{visibility:visible;pointer-events:auto;}}
+.mobile-nav-header{{display:flex;align-items:center;justify-content:space-between;padding:20px 20px 16px;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;}}
+.mobile-nav-title{{color:#fff;font-size:17px;font-weight:700;}}
+.mobile-nav-close{{background:none;border:none;color:rgba(255,255,255,.7);font-size:32px;cursor:pointer;padding:0;line-height:1;}}
+.mobile-nav-links{{padding:16px 12px;flex:1;overflow-y:auto;}}
+.mobile-nav-links a{{display:flex;align-items:center;gap:14px;padding:15px 16px;border-radius:12px;text-decoration:none;color:rgba(255,255,255,.6);font-size:16px;font-weight:500;margin-bottom:4px;}}
+.mobile-nav-links a.active{{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;}}
+.mobile-nav-icon{{font-size:20px;width:24px;text-align:center;}}
+@media(max-width:768px){{.menu-btn{{display:block!important;}}.main{{margin-left:0!important;}}.sidebar{{display:none!important;}}}}
+</style>
 </head>
 <body>
-<div id="mobileNav" class="mobile-nav">
+<div id="mobileNav">
   <div class="mobile-nav-header">
     <span class="mobile-nav-title">🎵 Studio Console</span>
     <button class="mobile-nav-close" onclick="closeMobileNav()">✕</button>
   </div>
   <nav class="mobile-nav-links">
-    {"".join(f'<a href="{href}" class="{"active" if k==active else ""}"><span class="mobile-nav-icon">{icon}</span>{label}</a>' for k,href,icon,label in nav_links)}
+    {"".join('<a href="' + href + '" class="' + ("active" if k==active else "") + '"><span class="mobile-nav-icon">' + icon + '</span>' + label + '</a>' for k,href,icon,label in nav_links)}
     <a href="{logout_url}"><span class="mobile-nav-icon">🚪</span>Logout</a>
   </nav>
 </div>
@@ -1348,7 +1372,7 @@ def login_page(error: str = "", info: str = ""):
 <title>Login — Studio Console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=4">
 </head>
 <body>
 <div class="login-wrap">
@@ -1452,7 +1476,7 @@ def resend_confirmation_page(info: str = "", error: str = ""):
 <title>Resend Confirmation — Studio Console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=4">
 </head>
 <body>
 <div class="login-wrap">
@@ -1523,7 +1547,7 @@ def signup_page(error: str = ""):
 <title>Sign Up — Studio Console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=4">
 </head>
 <body>
 <div class="login-wrap">
@@ -1645,7 +1669,7 @@ def confirm_email(token: str):
                 status_code=303,
             )
     return HTMLResponse("""<!DOCTYPE html><html><head>
-<link rel="stylesheet" href="/static/style.css"></head><body>
+<link rel="stylesheet" href="/static/style.css?v=4"></head><body>
 <div class="login-wrap"><div class="login-card">
 <div class="login-logo">🎵</div>
 <div class="alert alert-danger">This confirmation link is invalid or has already been used.</div>
@@ -1660,7 +1684,7 @@ _FORGOT_PW_PAGE = """<!DOCTYPE html>
 <title>Forgot Password — Studio Console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=4">
 </head><body>
 <div class="login-wrap"><div class="login-card">
   <div class="login-logo">🎵</div>
@@ -1730,7 +1754,7 @@ def reset_password_page(token: str, error: str = ""):
                 expires = 0
             if datetime.now().timestamp() > expires:
                 return HTMLResponse("""<!DOCTYPE html><html><head>
-<link rel="stylesheet" href="/static/style.css"></head><body>
+<link rel="stylesheet" href="/static/style.css?v=4"></head><body>
 <div class="login-wrap"><div class="login-card">
 <div class="login-logo">🎵</div>
 <div class="alert alert-danger">This reset link has expired. Please request a new one.</div>
@@ -1744,7 +1768,7 @@ def reset_password_page(token: str, error: str = ""):
 <title>Reset Password — Studio Console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=4">
 </head><body>
 <div class="login-wrap"><div class="login-card">
   <div class="login-logo">🎵</div>
@@ -1778,7 +1802,7 @@ function checkMatch(){{
 </script>
 </body></html>""")
     return HTMLResponse("""<!DOCTYPE html><html><head>
-<link rel="stylesheet" href="/static/style.css"></head><body>
+<link rel="stylesheet" href="/static/style.css?v=4"></head><body>
 <div class="login-wrap"><div class="login-card">
 <div class="login-logo">🎵</div>
 <div class="alert alert-danger">This reset link is invalid or has already been used.</div>
@@ -2280,7 +2304,7 @@ def schedule_page():
     return HTMLResponse(f"""
     <!DOCTYPE html>
     <html>
-    <head><title>Schedule</title><link rel="stylesheet" href="/static/style.css"></head>
+    <head><title>Schedule</title><link rel="stylesheet" href="/static/style.css?v=4"></head>
     <body>
         <div class="container"><div class="card"><h1>📅 Schedule Lesson</h1><form action="/create-lesson" method="post"><select name="student_name" required><option value="">Select Student</option>{options}</select><input type="date" name="date" required><input type="time" name="time" required><select name="duration"><option value="30">30 min</option><option value="60" selected>60 min</option><option value="90">90 min</option></select><button type="submit" class="btn">Create Lesson</button></form></div>
         <a href="/dashboard" class="btn">← Back</a></div>
@@ -2290,7 +2314,7 @@ def schedule_page():
 
 @app.post("/create-lesson")
 def create_lesson(student_name: str = Form(...), date: str = Form(...), time: str = Form(...), duration: int = Form(60)):
-    return HTMLResponse(f"""<!DOCTYPE html><html><head><title>Lesson Created</title><link rel="stylesheet" href="/static/style.css"></head><body><div class="container"><div class="card" style="text-align:center;"><h1>✅ Lesson Created!</h1><p><strong>{student_name}</strong> on {date} at {time} for {duration} minutes</p><a href="/schedule" class="btn">Schedule Another</a><a href="/dashboard" class="btn">Dashboard</a></div></div></body></html>""")
+    return HTMLResponse(f"""<!DOCTYPE html><html><head><title>Lesson Created</title><link rel="stylesheet" href="/static/style.css?v=4"></head><body><div class="container"><div class="card" style="text-align:center;"><h1>✅ Lesson Created!</h1><p><strong>{student_name}</strong> on {date} at {time} for {duration} minutes</p><a href="/schedule" class="btn">Schedule Another</a><a href="/dashboard" class="btn">Dashboard</a></div></div></body></html>""")
 
 # Google Calendar endpoints
 @app.get("/calendar-auth")
@@ -2444,7 +2468,7 @@ def payments_page():
     <html>
     <head>
         <title>Record Payment</title>
-        <link rel="stylesheet" href="/static/style.css">
+        <link rel="stylesheet" href="/static/style.css?v=4">
         <style>
             .form-row {{ display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap; }}
             .form-group {{ flex: 1; min-width: 150px; }}
@@ -2689,7 +2713,7 @@ def email_settings():
     <html>
     <head>
         <title>Email Settings</title>
-        <link rel="stylesheet" href="/static/style.css">
+        <link rel="stylesheet" href="/static/style.css?v=4">
     </head>
     <body>
         <div class="container">
@@ -2723,7 +2747,7 @@ def sms_settings():
     <html>
     <head>
         <title>SMS Settings</title>
-        <link rel="stylesheet" href="/static/style.css">
+        <link rel="stylesheet" href="/static/style.css?v=4">
     </head>
     <body>
         <div class="container">
@@ -3650,7 +3674,7 @@ def parent_login_page(error: str = ""):
 <title>Parent Login — Studio Console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=4">
 </head>
 <body>
 <div class="login-wrap">
@@ -3924,7 +3948,7 @@ def student_login_page(error: str = ""):
 <title>Student Login — Studio Console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=4">
 </head>
 <body>
 <div class="login-wrap">
