@@ -17,6 +17,8 @@ import LessonNoteScreen      from '../screens/LessonNoteScreen';
 import TeacherPaymentScreen  from '../screens/PaymentScreen';
 import OnboardingScreen      from '../screens/OnboardingScreen';
 import StripeConnectScreen   from '../screens/StripeConnectScreen';
+import SettingsScreen        from '../screens/SettingsScreen';
+import AdminScreen           from '../screens/AdminScreen';
 
 import ParentLoginScreen     from '../screens/parent/LoginScreen';
 import ParentDashboard       from '../screens/parent/DashboardScreen';
@@ -48,6 +50,8 @@ const TAB_LABEL_STYLE = { fontSize: 11, fontWeight: '600', marginTop: 2 };
 const HEADER_STYLE = { backgroundColor: '#fff', borderBottomWidth: 0, elevation: 0, shadowOpacity: 0 };
 
 const MORE_ITEMS = [
+  { label: 'Settings',           icon: '⚙️',  screen: 'Settings' },
+  { label: 'Admin & Stats',      icon: '🔐', screen: 'Admin' },
   { label: 'Onboarding / Setup', icon: '🚀', screen: 'Onboarding' },
   { label: 'Stripe Payments',    icon: '💳', screen: 'StripeConnect' },
 ];
@@ -208,6 +212,8 @@ export default function AppNavigator() {
           return <TeacherTabs {...props} />;
         }} />
 
+        <Stack.Screen name="Settings"        component={SettingsScreen}       options={{ headerShown: true, title: 'Settings' }} />
+        <Stack.Screen name="Admin"           component={AdminScreen}          options={{ headerShown: true, title: 'Admin' }} />
         <Stack.Screen name="Onboarding"     component={OnboardingScreen}     options={{ gestureEnabled: false }} />
         <Stack.Screen name="StudentProfile" component={StudentProfileScreen} options={{ headerShown: true, title: '' }} />
         <Stack.Screen name="Attendance"     component={AttendanceScreen}     options={{ headerShown: true, title: 'Record Attendance' }} />

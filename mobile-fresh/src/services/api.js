@@ -127,6 +127,22 @@ export async function parentCreatePaymentIntent(amountCents, description) {
   return res.data;
 }
 
+// ── Settings API ─────────────────────────────────────────────────────────────
+export async function getSettings() {
+  const res = await client.get('/api/mobile/settings');
+  return res.data;
+}
+export async function saveSettings(payload) {
+  const res = await client.post('/api/mobile/settings', payload);
+  return res.data;
+}
+
+// ── Admin API ─────────────────────────────────────────────────────────────────
+export async function getAdminStats() {
+  const res = await client.get('/api/mobile/admin/stats');
+  return res.data;
+}
+
 // ── Student API ───────────────────────────────────────────────────────────────
 export async function studentGetDashboard() {
   const res = await studentClient.get('/api/mobile/student/dashboard');

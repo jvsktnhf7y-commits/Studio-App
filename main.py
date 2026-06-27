@@ -4720,3 +4720,40 @@ def beta_analytics_page():
 
     return HTMLResponse(page("Beta Analytics", content, "beta-stats"))
 
+
+# ─── Mobile Settings & Admin API ───────────────────────────────────────────────
+
+@app.get("/api/mobile/settings")
+def mobile_get_settings(request: Request):
+    if request.headers.get("Authorization") != "Bearer authenticated":
+        return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+    s = load_calendar_settings()
+    return JSONResponse({"ok": True, "lesson_keywords": s.get("lesson_keywords", []), "show_all": s.get("show_all", True)})
+
+
+@app.post("/api/mobile/settings")
+async def mobile_save_settings(request: Request):
+    if request.headers.get("Authorization") != "Bearer authenticated":
+        return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+    data = await request.json()
+    save_calendar_settings({
+        "lesson_keywords": [k.strip() for k in data.get("lesson_keywords", []) if k.strip()],
+        "show_all": bool(data.get("show_all", True)),
+    })
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/mobile/admin/stats")
+def mobile_admin_stats(request: Request):
+    if request.headers.get("Authorization") != "Bearer authenticated":
+        return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+    profiles  = get_all_profiles()
+    total_rev = calculate_total_revenue()
+    total_pre = sum(d.get("prepaid", 0) for d in profiles.values())
+    return JSONResponse({
+        "ok":           True,
+        "student_count": len(profiles),
+        "total_revenue": round(total_rev, 2),
+        "total_prepaid": round(total_pre, 2),
+    })
+
