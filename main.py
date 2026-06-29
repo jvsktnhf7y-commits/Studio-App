@@ -293,18 +293,22 @@ def page(title: str, content: str, active: str = "dashboard") -> str:
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css?v=4">
 <style>
+#mn-cb{{position:fixed;top:-999px;left:-999px;opacity:0;}}
+#mn{{position:fixed;top:0;left:0;width:100vw;height:100vh;background:#0f172a;z-index:9999;display:flex;flex-direction:column;overflow-y:auto;visibility:hidden;pointer-events:none;}}
+#mn-cb:checked~#mn{{visibility:visible;pointer-events:auto;}}
 @media(max-width:768px){{.menu-btn{{display:block!important;}}.main{{margin-left:0!important;}}.sidebar{{display:none!important;}}}}
 </style>
 </head>
 <body>
-<div id="mn" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:#0f172a;z-index:9999;flex-direction:column;overflow-y:auto;">
+<input type="checkbox" id="mn-cb">
+<div id="mn">
   <div style="display:flex;align-items:center;justify-content:space-between;padding:20px;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;">
     <span style="color:#fff;font-size:17px;font-weight:700;">🎵 Studio Console</span>
-    <button onclick="document.getElementById('mn').style.display='none'" style="background:none;border:none;color:rgba(255,255,255,.7);font-size:36px;cursor:pointer;padding:0;line-height:1;">✕</button>
+    <label for="mn-cb" style="color:rgba(255,255,255,.7);font-size:36px;cursor:pointer;line-height:1;padding:0 4px;">✕</label>
   </div>
   <nav style="padding:16px 12px;flex:1;overflow-y:auto;">
     {"".join('<a href="' + href + '" style="display:flex;align-items:center;gap:14px;padding:15px 16px;border-radius:12px;text-decoration:none;color:' + ('rgba(255,255,255,1)' if k==active else 'rgba(255,255,255,.6)') + ';font-size:16px;font-weight:' + ('700' if k==active else '500') + ';margin-bottom:4px;background:' + ('linear-gradient(135deg,#6366f1,#8b5cf6)' if k==active else 'transparent') + '"><span style="font-size:20px;width:24px;text-align:center;">' + icon + '</span>' + label + '</a>' for k,href,icon,label in links)}
-    <a href="/logout" style="display:flex;align-items:center;gap:14px;padding:15px 16px;border-radius:12px;text-decoration:none;color:rgba(255,255,255,.6);font-size:16px;font-weight:500;margin-bottom:4px;"><span style="font-size:20px;width:24px;text-align:center;">🚪</span>Logout</a>
+    <a href="/logout" style="display:flex;align-items:center;gap:14px;padding:15px 16px;border-radius:12px;text-decoration:none;color:rgba(255,255,255,.6);font-size:16px;font-weight:500;"><span style="font-size:20px;width:24px;text-align:center;">🚪</span>Logout</a>
   </nav>
 </div>
 <div class="layout">
@@ -326,7 +330,7 @@ def page(title: str, content: str, active: str = "dashboard") -> str:
 <div class="main">
   <header class="topbar">
     <div style="display:flex;align-items:center;gap:10px;">
-      <button class="menu-btn" onclick="document.getElementById('mn').style.display='flex'">☰</button>
+      <label for="mn-cb" class="menu-btn" style="cursor:pointer;font-size:24px;padding:4px 8px;">☰</label>
       <span class="topbar-title">{title}</span>
     </div>
   </header>
@@ -478,14 +482,18 @@ def portal_page(title: str, content: str, active: str, nav_links: list,
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css?v=4">
 <style>
+#mn-cb{{position:fixed;top:-999px;left:-999px;opacity:0;}}
+#mn{{position:fixed;top:0;left:0;width:100vw;height:100vh;background:#0f172a;z-index:9999;display:flex;flex-direction:column;overflow-y:auto;visibility:hidden;pointer-events:none;}}
+#mn-cb:checked~#mn{{visibility:visible;pointer-events:auto;}}
 @media(max-width:768px){{.menu-btn{{display:block!important;}}.main{{margin-left:0!important;}}.sidebar{{display:none!important;}}}}
 </style>
 </head>
 <body>
-<div id="mn" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:#0f172a;z-index:9999;flex-direction:column;overflow-y:auto;">
+<input type="checkbox" id="mn-cb">
+<div id="mn">
   <div style="display:flex;align-items:center;justify-content:space-between;padding:20px;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;">
     <span style="color:#fff;font-size:17px;font-weight:700;">🎵 Studio Console</span>
-    <button onclick="document.getElementById('mn').style.display='none'" style="background:none;border:none;color:rgba(255,255,255,.7);font-size:36px;cursor:pointer;padding:0;line-height:1;">✕</button>
+    <label for="mn-cb" style="color:rgba(255,255,255,.7);font-size:36px;cursor:pointer;line-height:1;padding:0 4px;">✕</label>
   </div>
   <nav style="padding:16px 12px;flex:1;overflow-y:auto;">
     {"".join('<a href="' + href + '" style="display:flex;align-items:center;gap:14px;padding:15px 16px;border-radius:12px;text-decoration:none;color:' + ('rgba(255,255,255,1)' if k==active else 'rgba(255,255,255,.6)') + ';font-size:16px;font-weight:' + ('700' if k==active else '500') + ';margin-bottom:4px;background:' + ('linear-gradient(135deg,#6366f1,#8b5cf6)' if k==active else 'transparent') + '"><span style="font-size:20px;width:24px;text-align:center;">' + icon + '</span>' + label + '</a>' for k,href,icon,label in nav_links)}
@@ -511,7 +519,7 @@ def portal_page(title: str, content: str, active: str, nav_links: list,
 <div class="main">
   <header class="topbar">
     <div style="display:flex;align-items:center;gap:10px;">
-      <button class="menu-btn" onclick="document.getElementById('mn').style.display='flex'">☰</button>
+      <label for="mn-cb" class="menu-btn" style="cursor:pointer;font-size:24px;padding:4px 8px;">☰</label>
       <span class="topbar-title">{title}</span>
     </div>
   </header>
@@ -1846,6 +1854,10 @@ async def auth_middleware(request: Request, call_next):
             cookie_session = request.cookies.get("session", "")
             if auth_header != "Bearer authenticated" and cookie_session != "authenticated":
                 return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+            if path != "/api/mobile/subscription-status":
+                sub_status = _sub_get().get('subscription_status', 'none')
+                if sub_status not in ('active', 'trialing'):
+                    return JSONResponse({"ok": False, "error": "subscription_required"}, status_code=402)
         # Parent routes
         if path.startswith("/api/mobile/parent/"):
             auth_header = request.headers.get("Authorization", "")
@@ -1885,6 +1897,11 @@ async def auth_middleware(request: Request, call_next):
     # Billing paths: authenticated users can always reach them (that's where they subscribe)
     if path in _BILLING_PATHS:
         return await call_next(request)
+
+    # Subscription gate — redirect to billing if not active
+    sub_status = _sub_get().get('subscription_status', 'none')
+    if sub_status not in ('active', 'trialing'):
+        return RedirectResponse(url="/billing?msg=subscribe", status_code=303)
 
     # Log page views for GET requests (not API/static calls)
     if (request.method == "GET"
@@ -4074,6 +4091,15 @@ def backup_csv():
 
 
 # ─── Mobile API ────────────────────────────────────────────────────────────────
+
+@app.get("/api/mobile/subscription-status")
+def mobile_subscription_status(request: Request):
+    if request.headers.get("Authorization") != "Bearer authenticated":
+        return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+    sub    = _sub_get()
+    status = sub.get('subscription_status', 'none')
+    return JSONResponse({"ok": True, "status": status, "active": status in ('active', 'trialing')})
+
 
 @app.post("/api/mobile/login")
 async def mobile_login(request: Request):
