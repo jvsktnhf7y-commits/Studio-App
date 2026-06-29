@@ -1836,8 +1836,8 @@ _BILLING_PATHS   = frozenset(["/billing", "/create-checkout-session",
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
 
-    # Stripe webhook: fully public — Stripe servers POST here, no cookie possible
-    if path == '/webhook/stripe':
+    # Stripe webhook and cron jobs: fully public — authenticated by their own secrets
+    if path == '/webhook/stripe' or path.startswith('/api/cron/'):
         return await call_next(request)
 
     if (path in _PUBLIC_PATHS or path.startswith("/static/")
