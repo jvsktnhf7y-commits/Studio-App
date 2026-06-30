@@ -1,11 +1,14 @@
 {
   "expo": {
     "name": "Studio App",
-    "slug": "studio-app",
+    "slug": "studio-manager",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#12112a"
+    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.maestro.studio",

@@ -39,15 +39,15 @@ const Tab   = createBottomTabNavigator();
 Notifications.setNotificationHandler({ handleNotification: async () => ({ shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false }) });
 
 const TAB_BAR_STYLE = {
-  backgroundColor: '#fff',
-  borderTopColor: COLORS.border,
+  backgroundColor: '#1e1c3a',
+  borderTopColor: '#2e2b52',
   borderTopWidth: 1,
   height: 82,
   paddingTop: 8,
   paddingBottom: 16,
 };
 const TAB_LABEL_STYLE = { fontSize: 11, fontWeight: '600', marginTop: 2 };
-const HEADER_STYLE = { backgroundColor: '#fff', borderBottomWidth: 0, elevation: 0, shadowOpacity: 0 };
+const HEADER_STYLE = { backgroundColor: '#12112a', borderBottomWidth: 0, elevation: 0, shadowOpacity: 0 };
 
 const MORE_ITEMS = [
   { label: 'Settings',           icon: '⚙️',  screen: 'Settings' },
@@ -244,10 +244,10 @@ export default function AppNavigator() {
 
 const moreStyles = StyleSheet.create({
   backdrop:  { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
-  sheet:     { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingVertical: 12, paddingHorizontal: 8, paddingBottom: 36 },
+  sheet:     { backgroundColor: '#1e1c3a', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingVertical: 12, paddingHorizontal: 8, paddingBottom: 36 },
   item:      { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16, borderRadius: 12 },
   itemIcon:  { fontSize: 22, width: 28, textAlign: 'center' },
-  itemLabel: { flex: 1, fontSize: 16, fontWeight: '600', color: '#18181b' },
-  chevron:   { fontSize: 22, color: '#a1a1aa' },
-  divider:   { height: 1, backgroundColor: '#e4e4e7', marginVertical: 6, marginHorizontal: 8 },
+  itemLabel: { flex: 1, fontSize: 16, fontWeight: '600', color: '#f0eeff' },
+  chevron:   { fontSize: 22, color: '#6b629e' },
+  divider:   { height: 1, backgroundColor: '#2e2b52', marginVertical: 6, marginHorizontal: 8 },
 });
