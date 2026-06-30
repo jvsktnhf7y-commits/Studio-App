@@ -275,8 +275,10 @@ def page(title: str, content: str, active: str = "dashboard") -> str:
         ("schedule",  "/schedule",   "📅", "Schedule"),
         ("students",  "/students",   "👥", "Students"),
         ("payments",  "/payments",   "💳", "Payments"),
+        ("invoices",  "/invoices",   "🧾", "Invoices"),
+        ("analytics", "/analytics",  "📊", "Analytics"),
         ("settings",  "/settings",   "⚙️",  "Settings"),
-        ("billing",   "/billing",    "🧾", "Billing"),
+        ("billing",   "/billing",    "💰", "Billing"),
         ("admin",     "/admin",      "🔐", "Admin"),
     ]
     nav_html = "".join(
@@ -1940,7 +1942,7 @@ def students_page(new_name: str = Query("")):
         rows += f"""<tr>
   <td><div style="display:flex;align-items:center;gap:10px;">
     <div class="student-avatar" style="width:30px;height:30px;font-size:11px;border-radius:7px;">{initials}</div>
-    <strong>{name}</strong></div></td>
+    <a href="/students/{name}/notes" style="font-weight:700;color:var(--primary);text-decoration:none;">{name}</a></div></td>
   <td>${data['rate']:.2f}/lesson</td>
   <td>{data.get('target_minutes',60)} min</td>
   <td>{data.get('description','') or '—'}</td>
@@ -3080,6 +3082,39 @@ def analytics_page():
         for s in data['revenue_by_student']
     ) or '<tr><td colspan="2" style="text-align:center;color:var(--muted);padding:16px;">No data yet</td></tr>'
 
+    # ── Tax summary: revenue + lessons per year ──────────────────────────────
+    from collections import defaultdict as _dd
+    year_rev = _dd(float)
+    year_lessons = _dd(int)
+    year_students = _dd(set)
+    all_rows = []
+    if os.path.exists(LEDGER_FILE):
+        with open(LEDGER_FILE, 'r') as _f:
+            for _row in _ledger_reader(_f):
+                try:
+                    _row['_date'] = datetime.strptime(_row.get('Date',''), '%Y-%m-%d')
+                    _yr = _row['_date'].year
+                    _amt = _safe_float(_row.get('AmountCharged', 0))
+                    year_rev[_yr] += _amt
+                    if _row.get('Status','') in ATTENDED_STATUSES:
+                        year_lessons[_yr] += 1
+                        year_students[_yr].add(_row.get('Student',''))
+                    all_rows.append(_row)
+                except Exception:
+                    pass
+
+    tax_rows = ""
+    for yr in sorted(year_rev.keys(), reverse=True):
+        tax_rows += f"""<tr>
+  <td><strong>{yr}</strong></td>
+  <td style="color:var(--success);font-weight:700;">${year_rev[yr]:.2f}</td>
+  <td>{year_lessons.get(yr,0)}</td>
+  <td>{len(year_students.get(yr,set()))}</td>
+  <td><a href="/analytics/tax-csv?year={yr}" class="btn btn-sm btn-outline" style="font-size:11px;">⬇ CSV</a></td>
+</tr>"""
+    if not tax_rows:
+        tax_rows = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px;">No lesson data yet</td></tr>'
+
     content = f"""
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
@@ -3123,6 +3158,15 @@ def analytics_page():
   </div>
 </div>
 
+<div class="chart-card" style="margin-bottom:16px;">
+  <h3>🧾 Tax Summary — Income by Year</h3>
+  <p style="color:var(--muted);font-size:12px;margin:-8px 0 14px;">Download any year as a CSV for your accountant. Includes date, student, duration, amount charged.</p>
+  <table>
+    <thead><tr><th>Year</th><th>Total Income</th><th>Lessons Taught</th><th>Students</th><th>Download</th></tr></thead>
+    <tbody>{tax_rows}</tbody>
+  </table>
+</div>
+
 <script>
 const D = {chart_json};
 Chart.defaults.font.family = "'Inter',-apple-system,sans-serif";
@@ -3130,6 +3174,39 @@ new Chart(document.getElementById('monthlyChart'),{{type:'bar',data:{{labels:D.m
 new Chart(document.getElementById('attChart'),{{type:'doughnut',data:{{labels:['Confirmed','Missed','Cancelled'],datasets:[{{data:D.attValues,backgroundColor:['rgba(16,185,129,.85)','rgba(239,68,68,.85)','rgba(245,158,11,.85)'],borderColor:['#10b981','#ef4444','#f59e0b'],borderWidth:2}}]}},options:{{responsive:true,cutout:'62%',plugins:{{legend:{{position:'bottom'}}}}}}}});
 </script>"""
     return HTMLResponse(page("Analytics", content, "analytics"))
+
+
+@app.get("/analytics/tax-csv")
+def analytics_tax_csv(request: Request, year: int = 0):
+    user = _require_web_auth(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    rows = []
+    if os.path.exists(LEDGER_FILE):
+        with open(LEDGER_FILE, 'r') as f:
+            for row in _ledger_reader(f):
+                try:
+                    d = datetime.strptime(row.get('Date',''), '%Y-%m-%d')
+                    if year and d.year != year:
+                        continue
+                    rows.append({
+                        'Date': row.get('Date',''),
+                        'Student': row.get('Student',''),
+                        'Status': row.get('Status',''),
+                        'Duration (min)': row.get('DurationMinutes', row.get('Duration','60')),
+                        'Amount Charged': row.get('AmountCharged','0'),
+                        'Notes': row.get('Notes',''),
+                    })
+                except Exception:
+                    pass
+    import io as _io
+    buf = _io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=['Date','Student','Status','Duration (min)','Amount Charged','Notes'])
+    writer.writeheader()
+    writer.writerows(rows)
+    filename = f"studio_income_{year or 'all'}.csv"
+    return Response(content=buf.getvalue(), media_type='text/csv',
+                    headers={'Content-Disposition': f'attachment; filename="{filename}"'})
 
 
 # ─── Invoices ─────────────────────────────────────────────────────────────────
