@@ -149,6 +149,42 @@ export async function saveSettings(payload) {
   return res.data;
 }
 
+// ── Make-up lessons — Teacher ─────────────────────────────────────────────────
+export async function getMakeupCredits() {
+  const res = await client.get('/api/mobile/makeup/credits');
+  return res.data;
+}
+export async function getMakeupSlots() {
+  const res = await client.get('/api/mobile/makeup/slots');
+  return res.data;
+}
+export async function addMakeupSlot(date, time, duration, note = '') {
+  const res = await client.post('/api/mobile/makeup/slots', { date, time, duration, note });
+  return res.data;
+}
+export async function deleteMakeupSlot(slotId) {
+  const res = await client.delete(`/api/mobile/makeup/slots/${slotId}`);
+  return res.data;
+}
+export async function adjustMakeupCredit(studentName, delta) {
+  const res = await client.post('/api/mobile/makeup/credits/adjust', { student_name: studentName, delta });
+  return res.data;
+}
+
+// ── Make-up lessons — Parent ──────────────────────────────────────────────────
+export async function parentGetMakeupCredits() {
+  const res = await parentClient.get('/api/mobile/parent/makeup/credits');
+  return res.data;
+}
+export async function parentGetMakeupSlots() {
+  const res = await parentClient.get('/api/mobile/makeup/slots');
+  return res.data;
+}
+export async function parentBookMakeup(slotId) {
+  const res = await parentClient.post('/api/mobile/parent/makeup/book', { slot_id: slotId });
+  return res.data;
+}
+
 // ── Admin API ─────────────────────────────────────────────────────────────────
 export async function getAdminStats() {
   const res = await client.get('/api/mobile/admin/stats');

@@ -2256,6 +2256,8 @@ def record_attendance(
             event_date, student_name, labels[status], f"{charge:.2f}",
             f"{duration_minutes} min - {status}",
         ])
+    if status in ("missed", "cancelled"):
+        _issue_makeup_credit(student_name)
     log_event("feature", detail=f"attendance:{status}")
     toast_msg = (
         f"{student_name.replace(' ', '+')}+confirmed+%E2%80%94+%24{charge:.2f}+charged"
@@ -4302,6 +4304,8 @@ async def mobile_record_attendance(request: Request):
                 f"Mobile — {status} ({duration_mins} min)",
             ])
 
+    if status in ("missed", "cancelled"):
+        _issue_makeup_credit(student_name)
     log_event("attendance", user=student_name, detail=status)
     new_balance = float(profile.get("prepaid", 0))
 
@@ -4510,6 +4514,136 @@ def _notify_parent(student_name: str, title: str, body: str, data: dict = None):
     token  = tokens.get(student_name)
     if token:
         _send_expo_push(token, title, body, data or {})
+
+
+# ── Make-up lessons ───────────────────────────────────────────────────────────
+MAKEUP_CREDITS_FILE = "/data/makeup_credits.json"
+MAKEUP_SLOTS_FILE   = "/data/makeup_slots.json"
+
+def _load_makeup_credits() -> dict:
+    if not os.path.exists(MAKEUP_CREDITS_FILE):
+        return {}
+    with open(MAKEUP_CREDITS_FILE, 'r') as f:
+        return json.load(f)
+
+def _save_makeup_credits(c: dict):
+    with open(MAKEUP_CREDITS_FILE, 'w') as f:
+        json.dump(c, f, indent=2)
+
+def _load_makeup_slots() -> list:
+    if not os.path.exists(MAKEUP_SLOTS_FILE):
+        return []
+    with open(MAKEUP_SLOTS_FILE, 'r') as f:
+        return json.load(f)
+
+def _save_makeup_slots(slots: list):
+    with open(MAKEUP_SLOTS_FILE, 'w') as f:
+        json.dump(slots, f, indent=2)
+
+def _issue_makeup_credit(student_name: str):
+    credits = _load_makeup_credits()
+    credits[student_name] = credits.get(student_name, 0) + 1
+    _save_makeup_credits(credits)
+
+def _notify_all_parents_with_credits(title: str, body: str, data: dict = None):
+    """Notify parents of students who have make-up credits."""
+    credits = _load_makeup_credits()
+    for student_name, count in credits.items():
+        if count > 0:
+            _notify_parent(student_name, title, body, data or {})
+
+@app.get("/api/mobile/makeup/credits")
+def mobile_get_makeup_credits(request: Request):
+    if request.headers.get("Authorization") != "Bearer authenticated":
+        return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+    return JSONResponse({"ok": True, "credits": _load_makeup_credits()})
+
+@app.post("/api/mobile/makeup/credits/adjust")
+async def mobile_adjust_makeup_credit(request: Request):
+    if request.headers.get("Authorization") != "Bearer authenticated":
+        return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+    data = await request.json()
+    student = data.get("student_name", "").strip()
+    delta   = int(data.get("delta", 0))
+    if not student:
+        return JSONResponse({"ok": False, "error": "student_name required"}, status_code=400)
+    credits = _load_makeup_credits()
+    credits[student] = max(0, credits.get(student, 0) + delta)
+    _save_makeup_credits(credits)
+    return JSONResponse({"ok": True, "credits": credits[student]})
+
+@app.get("/api/mobile/makeup/slots")
+def mobile_get_makeup_slots(request: Request):
+    auth = request.headers.get("Authorization", "")
+    if auth != "Bearer authenticated" and not auth.startswith("Bearer parent:"):
+        return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+    slots = [s for s in _load_makeup_slots() if not s.get("booked_by")]
+    return JSONResponse({"ok": True, "slots": slots})
+
+@app.post("/api/mobile/makeup/slots")
+async def mobile_add_makeup_slot(request: Request):
+    if request.headers.get("Authorization") != "Bearer authenticated":
+        return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+    data  = await request.json()
+    date  = data.get("date", "").strip()
+    time  = data.get("time", "").strip()
+    duration = int(data.get("duration", 60))
+    note  = data.get("note", "").strip()
+    if not date or not time:
+        return JSONResponse({"ok": False, "error": "date and time required"}, status_code=400)
+    slots = _load_makeup_slots()
+    slot_id = str(int(datetime.now().timestamp() * 1000))
+    slots.append({"id": slot_id, "date": date, "time": time,
+                  "duration": duration, "note": note, "booked_by": None})
+    _save_makeup_slots(slots)
+    _notify_all_parents_with_credits(
+        title="Make-up slot available",
+        body=f"A make-up lesson slot opened on {date} at {time}. Tap to book.",
+        data={"screen": "Makeup"},
+    )
+    return JSONResponse({"ok": True, "slot_id": slot_id})
+
+@app.delete("/api/mobile/makeup/slots/{slot_id}")
+def mobile_delete_makeup_slot(slot_id: str, request: Request):
+    if request.headers.get("Authorization") != "Bearer authenticated":
+        return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+    slots = [s for s in _load_makeup_slots() if s["id"] != slot_id]
+    _save_makeup_slots(slots)
+    return JSONResponse({"ok": True})
+
+@app.post("/api/mobile/parent/makeup/book")
+async def mobile_parent_book_makeup(request: Request):
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer parent:"):
+        return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+    student_name = auth.removeprefix("Bearer parent:").strip()
+    data    = await request.json()
+    slot_id = data.get("slot_id", "").strip()
+    slots   = _load_makeup_slots()
+    slot    = next((s for s in slots if s["id"] == slot_id and not s.get("booked_by")), None)
+    if not slot:
+        return JSONResponse({"ok": False, "error": "Slot not available"}, status_code=404)
+    credits = _load_makeup_credits()
+    if credits.get(student_name, 0) <= 0:
+        return JSONResponse({"ok": False, "error": "No make-up credits"}, status_code=403)
+    slot["booked_by"] = student_name
+    _save_makeup_slots(slots)
+    credits[student_name] = max(0, credits[student_name] - 1)
+    _save_makeup_credits(credits)
+    for token in _load_push_tokens():
+        _send_expo_push(token, "Make-up lesson booked",
+                        f"{student_name} booked the {slot['date']} at {slot['time']} slot.",
+                        {"screen": "Schedule"})
+    return JSONResponse({"ok": True, "slot": slot, "credits_remaining": credits[student_name]})
+
+@app.get("/api/mobile/parent/makeup/credits")
+def mobile_parent_makeup_credits(request: Request):
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer parent:"):
+        return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+    student_name = auth.removeprefix("Bearer parent:").strip()
+    credits = _load_makeup_credits()
+    return JSONResponse({"ok": True, "credits": credits.get(student_name, 0)})
 
 
 @app.get("/api/mobile/schedule")

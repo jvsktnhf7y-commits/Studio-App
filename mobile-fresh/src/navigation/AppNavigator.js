@@ -19,11 +19,13 @@ import OnboardingScreen      from '../screens/OnboardingScreen';
 import StripeConnectScreen   from '../screens/StripeConnectScreen';
 import SettingsScreen        from '../screens/SettingsScreen';
 import AdminScreen           from '../screens/AdminScreen';
+import MakeupSlotsScreen     from '../screens/MakeupSlotsScreen';
 
 import ParentLoginScreen     from '../screens/parent/LoginScreen';
 import ParentDashboard       from '../screens/parent/DashboardScreen';
 import ParentNotes           from '../screens/parent/NotesScreen';
 import ParentPayment         from '../screens/parent/PaymentScreen';
+import ParentMakeup          from '../screens/parent/MakeupScreen';
 
 import StudentLoginScreen    from '../screens/student/LoginScreen';
 import StudentDashboard      from '../screens/student/DashboardScreen';
@@ -50,6 +52,7 @@ const TAB_LABEL_STYLE = { fontSize: 11, fontWeight: '600', marginTop: 2 };
 const HEADER_STYLE = { backgroundColor: '#12112a', borderBottomWidth: 0, elevation: 0, shadowOpacity: 0 };
 
 const MORE_ITEMS = [
+  { label: 'Make-up Lessons',    icon: '🔄', screen: 'MakeupSlots' },
   { label: 'Settings',           icon: '⚙️',  screen: 'Settings' },
   { label: 'Admin & Stats',      icon: '🔐', screen: 'Admin' },
   { label: 'Onboarding / Setup', icon: '🚀', screen: 'Onboarding' },
@@ -120,7 +123,7 @@ function ParentTabs({ navigation }) {
   return (
     <Tab.Navigator screenOptions={({ route }) => ({
       tabBarIcon: ({ focused }) => {
-        const icons = { Home: '🏠', Notes: '📝', Pay: '💳' };
+        const icons = { Home: '🏠', Notes: '📝', Pay: '💳', 'Make-up': '🔄' };
         return <Text style={{ fontSize: focused ? 22 : 19, opacity: focused ? 1 : 0.5 }}>{icons[route.name]}</Text>;
       },
       tabBarActiveTintColor: '#667eea', tabBarInactiveTintColor: COLORS.muted,
@@ -135,8 +138,9 @@ function ParentTabs({ navigation }) {
           <Text style={{ color: '#667eea', fontWeight: '600', fontSize: 15 }}>Logout</Text>
         </TouchableOpacity>
       )}} />
-      <Tab.Screen name="Notes" component={ParentNotes}   options={{ title: 'Lesson Notes' }} />
-      <Tab.Screen name="Pay"   component={ParentPayment} options={{ title: 'Payments' }} />
+      <Tab.Screen name="Notes"    component={ParentNotes}   options={{ title: 'Lesson Notes' }} />
+      <Tab.Screen name="Make-up"  component={ParentMakeup}  options={{ title: 'Make-up Lessons' }} />
+      <Tab.Screen name="Pay"      component={ParentPayment} options={{ title: 'Payments' }} />
     </Tab.Navigator>
   );
 }
@@ -232,6 +236,7 @@ export default function AppNavigator() {
 
         <Stack.Screen name="Settings"        component={SettingsScreen}       options={{ headerShown: true, title: 'Settings' }} />
         <Stack.Screen name="Admin"           component={AdminScreen}          options={{ headerShown: true, title: 'Admin' }} />
+        <Stack.Screen name="MakeupSlots"     component={MakeupSlotsScreen}    options={{ headerShown: true, title: 'Make-up Lessons' }} />
         <Stack.Screen name="Onboarding"     component={OnboardingScreen}     options={{ gestureEnabled: false }} />
         <Stack.Screen name="StudentProfile" component={StudentProfileScreen} options={{ headerShown: true, title: '' }} />
         <Stack.Screen name="Attendance"     component={AttendanceScreen}     options={{ headerShown: true, title: 'Record Attendance' }} />
