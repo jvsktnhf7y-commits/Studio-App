@@ -1311,6 +1311,36 @@ def dashboard():
             calendar_items = f'<p style="color:var(--muted);font-size:13px;">{str(exc)[:80]}</p>'
     else:
         calendar_items = '<p style="color:var(--muted);font-size:13px;">Connect Google Calendar to see today\'s lessons.</p>'
+    # Build lesson balance rows for dashboard
+    balance_rows = ""
+    for sname, sdata in sorted(profiles.items()):
+        prepaid = float(sdata.get('prepaid', 0))
+        rate    = float(sdata.get('rate', 0))
+        lessons_covered = int(prepaid / rate) if rate > 0 else 0
+        if prepaid <= 0:
+            bal_color  = '#ef4444'
+            bal_icon   = '🔴'
+            lessons_txt = 'Payment due'
+        elif lessons_covered <= 1:
+            bal_color  = '#f59e0b'
+            bal_icon   = '🟡'
+            lessons_txt = f'{lessons_covered} lesson left'
+        else:
+            bal_color  = '#10b981'
+            bal_icon   = '🟢'
+            lessons_txt = f'{lessons_covered} lessons'
+        balance_rows += (
+            f'<div style="display:flex;align-items:center;justify-content:space-between;'
+            f'padding:9px 0;border-bottom:1px solid var(--border);">'
+            f'<span style="font-weight:600;font-size:13px;">{bal_icon} {sname}</span>'
+            f'<span style="font-size:12px;color:var(--muted);">'
+            f'<span style="color:{bal_color};font-weight:700;">${prepaid:.2f}</span>'
+            f' &nbsp;·&nbsp; {lessons_txt}</span>'
+            f'</div>'
+        )
+    if not balance_rows:
+        balance_rows = '<p style="color:var(--muted);font-size:13px;">No students yet.</p>'
+
     content = f"""
 <h1>Dashboard</h1>
 <div class="stats-row">
@@ -1340,6 +1370,13 @@ def dashboard():
     <a href="/payments" class="btn btn-warning" style="display:block;margin-bottom:8px;">💳 Record Payment</a>
     <a href="/billing"  class="btn btn-outline"  style="display:block;">🧾 Billing</a>
   </div>
+</div>
+<div class="card" style="margin-top:16px;">
+  <div class="card-header">
+    <span class="card-title">💰 Lessons Paid For</span>
+    <a href="/students" style="font-size:12px;color:var(--primary);text-decoration:none;font-weight:600;">Manage →</a>
+  </div>
+  {balance_rows}
 </div>"""
     return HTMLResponse(page("Dashboard", content, active="dashboard"))
 
@@ -1946,7 +1983,10 @@ def students_page(new_name: str = Query("")):
   <td>${data['rate']:.2f}/lesson</td>
   <td>{data.get('target_minutes',60)} min</td>
   <td>{data.get('description','') or '—'}</td>
-  <td><span class="badge badge-info">${prepaid:.2f}</span></td>
+  <td>
+    <span class="badge badge-info">${prepaid:.2f}</span>
+    {'<span class="badge badge-success" style="margin-left:4px;">'+str(int(prepaid/float(data.get("rate",1) or 1)))+' lessons</span>' if prepaid > 0 and float(data.get("rate",0)) > 0 else ('<span class="badge badge-danger" style="margin-left:4px;">Payment due</span>' if prepaid <= 0 else '')}
+  </td>
   <td>{owed_badge}</td>
   <td style="white-space:nowrap;">
     <a href="/students/{name}/notes" class="btn btn-sm btn-outline" style="margin-right:4px;">📝 Notes</a>
