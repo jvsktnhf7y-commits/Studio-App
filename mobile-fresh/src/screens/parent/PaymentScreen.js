@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Alert, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, TextInput } from 'react-native';
-import { useStripe } from '@stripe/stripe-react-native';
+import { View, Text, StyleSheet, Alert, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, TextInput, Linking, Clipboard } from 'react-native';
+import { useStripe, StripeProvider } from '@stripe/stripe-react-native';
+
+const STRIPE_PK = 'pk_test_51TiPs2C4vwE62RZDV0PMKClgT35K7BwAEJI9Oof3m7FVf8DuwgCG2BxbWQdXDBlDnWRhcaO1bYG4hdGDLJd7QVxQ0032CpqnPE';
 import { LinearGradient } from 'expo-linear-gradient';
 import Button from '../../components/Button';
-import { parentCreatePaymentIntent, parentGetDashboard } from '../../services/api';
+import { parentCreatePaymentIntent, parentGetDashboard, parentGetPaymentDue, parentGetPaymentHandles } from '../../services/api';
 import { COLORS, GRADIENT } from '../../theme';
 
 const PAYMENT_METHODS = [
@@ -13,16 +15,29 @@ const PAYMENT_METHODS = [
   { id: 'zelle', label: '💛  Zelle',        subtitle: 'Send to your teacher directly' },
 ];
 
-export default function ParentPaymentScreen({ navigation }) {
+function ParentPaymentInner({ navigation }) {
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
-  const [balance, setBalance] = useState(0);
-  const [amount,  setAmount]  = useState('');
-  const [method,  setMethod]  = useState('card');
-  const [loading, setLoading] = useState(false);
-  const [paid,    setPaid]    = useState(null);
+  const [balance,      setBalance]      = useState(0);
+  const [amount,       setAmount]       = useState('');
+  const [method,       setMethod]       = useState('card');
+  const [loading,      setLoading]      = useState(false);
+  const [paid,         setPaid]         = useState(null);
+  const [weekLessons,  setWeekLessons]  = useState(null);
+  const [amountDue,    setAmountDue]    = useState(null);
+  const [rate,         setRate]         = useState(null);
+  const [handles,      setHandles]      = useState({});
 
   useEffect(() => {
     parentGetDashboard().then(d => { if (d.ok) setBalance(d.balance); }).catch(() => {});
+    parentGetPaymentDue().then(d => {
+      if (d.ok) {
+        setWeekLessons(d.week_lessons);
+        setAmountDue(d.amount_due);
+        setRate(d.rate);
+        if (d.amount_due > 0 && !amount) setAmount(d.amount_due.toFixed(2));
+      }
+    }).catch(() => {});
+    parentGetPaymentHandles().then(d => { if (d.ok) setHandles(d); }).catch(() => {});
   }, []);
 
   async function handleCardPayment() {
@@ -83,6 +98,81 @@ export default function ParentPaymentScreen({ navigation }) {
           <Text style={[styles.balanceValue, { color: balanceColor }]}>${balance.toFixed(2)}</Text>
         </View>
 
+        {weekLessons !== null && weekLessons > 0 && (
+          <View style={styles.dueCard}>
+            <Text style={styles.dueTitle}>💡 Payment requested</Text>
+            <View style={styles.dueRow}>
+              <Text style={styles.dueLine}>{weekLessons} lesson{weekLessons !== 1 ? 's' : ''} this week</Text>
+              <Text style={styles.dueRate}>× ${rate?.toFixed(2)}/lesson</Text>
+            </View>
+            <View style={[styles.dueRow, { borderTopWidth: 1, borderTopColor: '#e4e4e7', marginTop: 8, paddingTop: 10 }]}>
+              <Text style={[styles.dueLine, { fontWeight: '800', color: '#18181b' }]}>Total due</Text>
+              <Text style={[styles.dueRate, { fontWeight: '800', color: COLORS.primary, fontSize: 18 }]}>${amountDue?.toFixed(2)}</Text>
+            </View>
+          </View>
+        )}
+
+        {(handles.venmo || handles.cashapp || handles.paypal || handles.zelle) && (
+          <View style={{ marginBottom: 16 }}>
+            <Text style={styles.label}>Pay your teacher directly</Text>
+            {handles.venmo ? (
+              <TouchableOpacity style={styles.handleBtn} onPress={() => {
+                const amt = parseFloat(amount) || 0;
+                const note = encodeURIComponent('Lesson payment');
+                Linking.openURL(`venmo://paycharge?txn=pay&recipients=${handles.venmo.replace('@','')}&amount=${amt}&note=${note}`);
+              }}>
+                <Text style={styles.handleIcon}>💜</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.handleLabel}>Pay via Venmo</Text>
+                  <Text style={styles.handleSub}>{handles.venmo}</Text>
+                </View>
+                <Text style={styles.handleArrow}>↗</Text>
+              </TouchableOpacity>
+            ) : null}
+            {handles.cashapp ? (
+              <TouchableOpacity style={styles.handleBtn} onPress={() => {
+                const amt = parseFloat(amount) || 0;
+                const tag = handles.cashapp.startsWith('$') ? handles.cashapp.slice(1) : handles.cashapp;
+                Linking.openURL(`https://cash.app/$${tag}/${amt}`);
+              }}>
+                <Text style={styles.handleIcon}>💚</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.handleLabel}>Pay via Cash App</Text>
+                  <Text style={styles.handleSub}>{handles.cashapp}</Text>
+                </View>
+                <Text style={styles.handleArrow}>↗</Text>
+              </TouchableOpacity>
+            ) : null}
+            {handles.paypal ? (
+              <TouchableOpacity style={styles.handleBtn} onPress={() => {
+                const amt = parseFloat(amount) || 0;
+                Linking.openURL(`https://paypal.me/${handles.paypal}/${amt}`);
+              }}>
+                <Text style={styles.handleIcon}>🔵</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.handleLabel}>Pay via PayPal</Text>
+                  <Text style={styles.handleSub}>paypal.me/{handles.paypal}</Text>
+                </View>
+                <Text style={styles.handleArrow}>↗</Text>
+              </TouchableOpacity>
+            ) : null}
+            {handles.zelle ? (
+              <TouchableOpacity style={styles.handleBtn} onPress={() => {
+                Clipboard.setString(handles.zelle);
+                Alert.alert('Copied!', `${handles.zelle} copied. Open your bank app and send via Zelle.`);
+              }}>
+                <Text style={styles.handleIcon}>💛</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.handleLabel}>Pay via Zelle</Text>
+                  <Text style={styles.handleSub}>{handles.zelle} — tap to copy</Text>
+                </View>
+                <Text style={styles.handleArrow}>⧉</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        )}
+
+        <Text style={[styles.label, { marginTop: 4 }]}>Or pay by card</Text>
         <Text style={styles.label}>Payment amount ($)</Text>
         <TextInput style={styles.input} value={amount} onChangeText={setAmount} placeholder="0.00" placeholderTextColor={COLORS.muted} keyboardType="decimal-pad" />
 
@@ -114,6 +204,14 @@ export default function ParentPaymentScreen({ navigation }) {
   );
 }
 
+export default function ParentPaymentScreen(props) {
+  return (
+    <StripeProvider publishableKey={STRIPE_PK}>
+      <ParentPaymentInner {...props} />
+    </StripeProvider>
+  );
+}
+
 const styles = StyleSheet.create({
   container:        { flex: 1, backgroundColor: COLORS.bg },
   balanceCard:      { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 20, borderWidth: 1.5, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
@@ -128,6 +226,16 @@ const styles = StyleSheet.create({
   checkmark:        { color: COLORS.primary, fontWeight: '800', fontSize: 18 },
   feeNotice:        { backgroundColor: '#fffaf0', borderRadius: 10, padding: 12, marginTop: 4, borderWidth: 1, borderColor: COLORS.warning },
   feeText:          { fontSize: 13, color: COLORS.text, lineHeight: 18 },
+  handleBtn:        { backgroundColor: '#fff', borderRadius: 14, borderWidth: 1.5, borderColor: COLORS.border, padding: 14, marginBottom: 10, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  handleIcon:       { fontSize: 22, width: 28, textAlign: 'center' },
+  handleLabel:      { fontSize: 15, fontWeight: '700', color: COLORS.text, marginBottom: 1 },
+  handleSub:        { fontSize: 12, color: COLORS.muted },
+  handleArrow:      { fontSize: 18, color: COLORS.muted, fontWeight: '700' },
+  dueCard:          { backgroundColor: '#f0f4ff', borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1.5, borderColor: COLORS.primary },
+  dueTitle:         { fontSize: 13, fontWeight: '700', color: COLORS.primary, marginBottom: 12 },
+  dueRow:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  dueLine:          { fontSize: 15, fontWeight: '600', color: '#3f3f46' },
+  dueRate:          { fontSize: 15, fontWeight: '600', color: '#52525b' },
   successContainer: { flex: 1, backgroundColor: COLORS.bg },
   successBanner:    { paddingTop: 60, paddingBottom: 40, alignItems: 'center', paddingHorizontal: 24 },
   successEmoji:     { fontSize: 56, marginBottom: 8 },

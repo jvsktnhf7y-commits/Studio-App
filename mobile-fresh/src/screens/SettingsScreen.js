@@ -11,6 +11,10 @@ export default function SettingsScreen({ navigation }) {
   const [saving,    setSaving]    = useState(false);
   const [keywords,  setKeywords]  = useState('');
   const [showAll,   setShowAll]   = useState(true);
+  const [venmo,     setVenmo]     = useState('');
+  const [cashapp,   setCashapp]   = useState('');
+  const [paypal,    setPaypal]    = useState('');
+  const [zelle,     setZelle]     = useState('');
 
   useEffect(() => {
     getSettings()
@@ -18,6 +22,10 @@ export default function SettingsScreen({ navigation }) {
         if (d.ok) {
           setKeywords((d.lesson_keywords || []).join(', '));
           setShowAll(d.show_all !== false);
+          setVenmo(d.venmo || '');
+          setCashapp(d.cashapp || '');
+          setPaypal(d.paypal || '');
+          setZelle(d.zelle || '');
         }
       })
       .catch(() => Alert.alert('Error', 'Could not load settings.'))
@@ -28,7 +36,7 @@ export default function SettingsScreen({ navigation }) {
     setSaving(true);
     try {
       const kwList = keywords.split(',').map(k => k.trim()).filter(Boolean);
-      await saveSettings({ lesson_keywords: kwList, show_all: showAll });
+      await saveSettings({ lesson_keywords: kwList, show_all: showAll, venmo, cashapp, paypal, zelle });
       Alert.alert('Saved', 'Settings updated.');
     } catch {
       Alert.alert('Error', 'Could not save settings.');
@@ -70,6 +78,32 @@ export default function SettingsScreen({ navigation }) {
             thumbColor="#fff"
           />
         </View>
+      </View>
+
+      <Text style={[styles.sectionLabel, { marginTop: 8 }]}>Payment Handles</Text>
+      <Text style={{ fontSize: 12, color: COLORS.muted, marginBottom: 10, lineHeight: 17 }}>
+        Parents will see buttons to pay you directly via these services.
+      </Text>
+      <View style={styles.card}>
+        {[
+          { label: 'Venmo username', placeholder: '@yourname', value: venmo, setter: setVenmo },
+          { label: 'Cash App $tag', placeholder: '$yourtag', value: cashapp, setter: setCashapp },
+          { label: 'PayPal.me slug', placeholder: 'yourname (from paypal.me/yourname)', value: paypal, setter: setPaypal },
+          { label: 'Zelle (phone or email)', placeholder: '+1 555-555-5555', value: zelle, setter: setZelle },
+        ].map(({ label, placeholder, value, setter }) => (
+          <View key={label} style={{ marginBottom: 14 }}>
+            <Text style={styles.label}>{label}</Text>
+            <TextInput
+              style={styles.input}
+              value={value}
+              onChangeText={setter}
+              placeholder={placeholder}
+              placeholderTextColor={COLORS.muted}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+        ))}
       </View>
 
       <TouchableOpacity

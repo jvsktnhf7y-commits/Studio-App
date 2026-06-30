@@ -2590,12 +2590,13 @@ async def mobile_set_parent_code(student_name: str, request: Request):
     return JSONResponse({"ok": True, "code": code})
 
 
-def _send_expo_push(token: str, title: str, body: str):
+def _send_expo_push(token: str, title: str, body: str, data: dict = None):
     try:
         import urllib.request, json as _json
         payload = _json.dumps({
             "to": token, "title": title, "body": body,
             "sound": "default", "priority": "high",
+            **({"data": data} if data else {}),
         }).encode()
         req = urllib.request.Request(
             "https://exp.host/--/api/v2/push/send",
@@ -4185,8 +4186,24 @@ async def mobile_record_attendance(request: Request):
             ])
 
     log_event("attendance", user=student_name, detail=status)
+    new_balance = float(profile.get("prepaid", 0))
+
+    # Notify parent if balance is now 0 or negative (lessons used up)
+    if charge and new_balance <= 0:
+        upcoming = get_upcoming_lessons_for_student(student_name, days=7)
+        week_count = len(upcoming)
+        rate = round(float(profile.get("rate", 0)), 2)
+        amount_due = round(week_count * rate, 2)
+        _notify_parent(
+            student_name,
+            title="Payment due for lessons",
+            body=f"{student_name}'s balance is $0. {week_count} lesson{'s' if week_count != 1 else ''} scheduled this week.",
+            data={"screen": "Pay", "student": student_name,
+                  "amount_due": amount_due, "week_lessons": week_count, "rate": rate},
+        )
+
     return JSONResponse({"ok": True, "status": status, "charge": charge,
-                         "new_balance": float(profile.get("prepaid", 0))})
+                         "new_balance": new_balance})
 
 
 # ─── Stripe Connect — Teacher Onboarding & Parent Payments ────────────────────
@@ -4347,7 +4364,8 @@ async def stripe_connect_webhook(request: Request):
     return JSONResponse({"ok": True})
 
 
-PUSH_TOKENS_FILE = "/data/push_tokens.json"
+PUSH_TOKENS_FILE        = "/data/push_tokens.json"
+PARENT_PUSH_TOKENS_FILE = "/data/parent_push_tokens.json"
 
 def _load_push_tokens() -> list:
     if not os.path.exists(PUSH_TOKENS_FILE):
@@ -4358,6 +4376,23 @@ def _load_push_tokens() -> list:
 def _save_push_tokens(tokens: list):
     with open(PUSH_TOKENS_FILE, 'w') as f:
         json.dump(tokens, f)
+
+def _load_parent_push_tokens() -> dict:
+    """Returns {student_name: token}"""
+    if not os.path.exists(PARENT_PUSH_TOKENS_FILE):
+        return {}
+    with open(PARENT_PUSH_TOKENS_FILE, 'r') as f:
+        return json.load(f)
+
+def _save_parent_push_tokens(tokens: dict):
+    with open(PARENT_PUSH_TOKENS_FILE, 'w') as f:
+        json.dump(tokens, f)
+
+def _notify_parent(student_name: str, title: str, body: str, data: dict = None):
+    tokens = _load_parent_push_tokens()
+    token  = tokens.get(student_name)
+    if token:
+        _send_expo_push(token, title, body, data or {})
 
 
 @app.get("/api/mobile/schedule")
@@ -4478,6 +4513,44 @@ async def mobile_register_push(request: Request):
 
 
 # ─── Mobile Parent API ─────────────────────────────────────────────────────────
+
+@app.post("/api/mobile/parent/register-push")
+async def mobile_parent_register_push(request: Request):
+    auth         = request.headers.get("Authorization", "")
+    student_name = auth.replace("Bearer parent:", "").strip()
+    if not student_name:
+        return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+    data  = await request.json()
+    token = data.get("token", "").strip()
+    if not token:
+        return JSONResponse({"ok": False, "error": "no token"}, status_code=400)
+    tokens = _load_parent_push_tokens()
+    tokens[student_name] = token
+    _save_parent_push_tokens(tokens)
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/mobile/parent/payment-due")
+def mobile_parent_payment_due(request: Request):
+    auth         = request.headers.get("Authorization", "")
+    student_name = auth.replace("Bearer parent:", "").strip()
+    if not student_name:
+        return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+    profiles = get_all_profiles()
+    profile  = profiles.get(student_name, {})
+    rate     = round(float(profile.get("rate", 0)), 2)
+    balance  = round(float(profile.get("prepaid", 0)), 2)
+    upcoming = get_upcoming_lessons_for_student(student_name, days=7)
+    week_lessons = len(upcoming)
+    amount_due   = round(week_lessons * rate, 2)
+    return JSONResponse({
+        "ok":          True,
+        "balance":     balance,
+        "rate":        rate,
+        "week_lessons": week_lessons,
+        "amount_due":  amount_due,
+    })
+
 
 @app.post("/api/mobile/parent/login")
 async def mobile_parent_login(request: Request):
@@ -4754,7 +4827,18 @@ def mobile_get_settings(request: Request):
     if request.headers.get("Authorization") != "Bearer authenticated":
         return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
     s = load_calendar_settings()
-    return JSONResponse({"ok": True, "lesson_keywords": s.get("lesson_keywords", []), "show_all": s.get("show_all", True)})
+    return JSONResponse({"ok": True, "lesson_keywords": s.get("lesson_keywords", []), "show_all": s.get("show_all", True),
+                         "venmo": s.get("venmo", ""), "cashapp": s.get("cashapp", ""), "paypal": s.get("paypal", ""), "zelle": s.get("zelle", "")})
+
+
+@app.get("/api/mobile/parent/payment-handles")
+def mobile_parent_payment_handles(request: Request):
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer parent:"):
+        return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+    s = load_calendar_settings()
+    return JSONResponse({"ok": True, "venmo": s.get("venmo", ""), "cashapp": s.get("cashapp", ""),
+                         "paypal": s.get("paypal", ""), "zelle": s.get("zelle", "")})
 
 
 @app.post("/api/mobile/settings")
@@ -4762,10 +4846,13 @@ async def mobile_save_settings(request: Request):
     if request.headers.get("Authorization") != "Bearer authenticated":
         return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
     data = await request.json()
-    save_calendar_settings({
-        "lesson_keywords": [k.strip() for k in data.get("lesson_keywords", []) if k.strip()],
-        "show_all": bool(data.get("show_all", True)),
-    })
+    s = load_calendar_settings()
+    s["lesson_keywords"] = [k.strip() for k in data.get("lesson_keywords", []) if k.strip()]
+    s["show_all"] = bool(data.get("show_all", True))
+    for key in ("venmo", "cashapp", "paypal", "zelle"):
+        if key in data:
+            s[key] = str(data[key]).strip()
+    save_calendar_settings(s)
     return JSONResponse({"ok": True})
 
 

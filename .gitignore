@@ -12,6 +12,11 @@ credentials.json
 token.json
 admin_password.json
 
+# Allow mobile app config
+!mobile-fresh/app.json
+!mobile-fresh/package.json
+!mobile-fresh/package-lock.json
+
 # IDE files
 .vscode/
 .DS_Store

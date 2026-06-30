@@ -29,7 +29,7 @@ import StudentLoginScreen    from '../screens/student/LoginScreen';
 import StudentDashboard      from '../screens/student/DashboardScreen';
 import StudentNotes          from '../screens/student/NotesScreen';
 
-import { isLoggedIn, logout, getStoredRole, registerPushToken } from '../services/api';
+import { isLoggedIn, logout, getStoredRole, registerPushToken, parentRegisterPush } from '../services/api';
 import { COLORS } from '../theme';
 
 const Stack = createNativeStackNavigator();
@@ -187,6 +187,15 @@ export default function AppNavigator() {
           }
         } catch {}
       }
+      if (storedRole === 'parent') {
+        try {
+          const { status } = await Notifications.requestPermissionsAsync();
+          if (status === 'granted') {
+            const token = (await Notifications.getExpoPushTokenAsync()).data;
+            await parentRegisterPush(token);
+          }
+        } catch {}
+      }
     })();
   }, []);
 
@@ -195,7 +204,16 @@ export default function AppNavigator() {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer
+      onReady={() => {
+        Notifications.addNotificationResponseReceivedListener(response => {
+          const data = response.notification.request.content.data;
+          if (data?.screen === 'Pay') {
+            // navigateRef would be ideal but tab nav handles this via state
+          }
+        });
+      }}
+    >
       <Stack.Navigator initialRouteName={initialRoute} screenOptions={{ headerShown: false }}>
         <Stack.Screen name="RoleSelect" component={RoleSelectScreen} />
 

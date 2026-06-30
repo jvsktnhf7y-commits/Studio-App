@@ -122,6 +122,18 @@ export async function parentGetNotes() {
   const res = await parentClient.get('/api/mobile/parent/notes');
   return res.data;
 }
+export async function parentRegisterPush(token) {
+  const res = await parentClient.post('/api/mobile/parent/register-push', { token });
+  return res.data;
+}
+export async function parentGetPaymentDue() {
+  const res = await parentClient.get('/api/mobile/parent/payment-due');
+  return res.data;
+}
+export async function parentGetPaymentHandles() {
+  const res = await parentClient.get('/api/mobile/parent/payment-handles');
+  return res.data;
+}
 export async function parentCreatePaymentIntent(amountCents, description) {
   const res = await parentClient.post('/api/mobile/parent/create-payment-intent', { amount_cents: amountCents, description });
   return res.data;
