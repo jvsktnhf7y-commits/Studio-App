@@ -144,6 +144,31 @@ def _fetch_stripe_data(sub: dict) -> dict:
 
 app = FastAPI(title="Studio App")
 
+# ── In-memory login rate limiting ─────────────────────────────────────────────
+import time as _time
+_login_attempts: dict = {}  # {ip: {"count": int, "locked_until": float}}
+_MAX_ATTEMPTS  = 5
+_LOCKOUT_SECS  = 600  # 10 minutes
+
+def _rl_blocked(ip: str) -> bool:
+    entry = _login_attempts.get(ip)
+    if entry and entry["locked_until"] > _time.time():
+        return True
+    return False
+
+def _rl_fail(ip: str):
+    now   = _time.time()
+    entry = _login_attempts.get(ip, {"count": 0, "locked_until": 0})
+    if entry["locked_until"] < now:
+        entry["count"] += 1
+    if entry["count"] >= _MAX_ATTEMPTS:
+        entry["locked_until"] = now + _LOCKOUT_SECS
+    _login_attempts[ip] = entry
+
+def _rl_clear(ip: str):
+    _login_attempts.pop(ip, None)
+# ─────────────────────────────────────────────────────────────────────────────
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -3814,14 +3839,19 @@ def parent_login_page(error: str = ""):
 
 
 @app.post("/parent/login")
-def parent_login_post(email: str = Form(...), password: str = Form(...)):
+def parent_login_post(request: Request, email: str = Form(...), password: str = Form(...)):
+    ip = request.client.host
+    if _rl_blocked(ip):
+        return RedirectResponse(url="/parent/login?error=Too+many+attempts.+Try+again+in+10+minutes.", status_code=303)
     email = email.strip().lower()
     pw_hash = hashlib.sha256(password.encode()).hexdigest()
     for u in get_all_users():
         if u.get("email") == email and u.get("password_hash") == pw_hash and u.get("role") == "parent":
+            _rl_clear(ip)
             response = RedirectResponse(url="/parent/dashboard", status_code=303)
             response.set_cookie(key="parent_session", value=email, httponly=True, max_age=86400 * 7)
             return response
+    _rl_fail(ip)
     return RedirectResponse(url="/parent/login?error=Invalid+credentials", status_code=303)
 
 
@@ -4091,14 +4121,20 @@ def student_login_page(error: str = ""):
 
 
 @app.post("/student/login")
-def student_login_post(student_name: str = Form(...), access_code: str = Form(...)):
+def student_login_post(request: Request, student_name: str = Form(...), access_code: str = Form(...)):
+    ip = request.client.host
+    if _rl_blocked(ip):
+        return RedirectResponse(url="/student/login?error=Too+many+attempts.+Try+again+in+10+minutes.", status_code=303)
     profiles = get_all_profiles()
     profile  = profiles.get(student_name, {})
     stored   = profile.get('access_code', '')
     if not stored:
+        _rl_fail(ip)
         return RedirectResponse(url="/student/login?error=No+access+code+set.+Ask+your+teacher.", status_code=303)
     if access_code.strip() != stored:
+        _rl_fail(ip)
         return RedirectResponse(url="/student/login?error=Incorrect+access+code", status_code=303)
+    _rl_clear(ip)
     response = RedirectResponse(url="/student/dashboard", status_code=303)
     response.set_cookie(key="student_session", value=student_name, httponly=True, max_age=86400 * 7)
     return response
@@ -4805,6 +4841,9 @@ def mobile_parent_payment_due(request: Request):
 
 @app.post("/api/mobile/parent/login")
 async def mobile_parent_login(request: Request):
+    ip = request.client.host
+    if _rl_blocked(ip):
+        return JSONResponse({"ok": False, "error": "Too many failed attempts. Try again in 10 minutes."}, status_code=429)
     data         = await request.json()
     student_name = data.get("student_name", "").strip()
     parent_code  = data.get("parent_code", "").strip().upper()
@@ -4812,9 +4851,12 @@ async def mobile_parent_login(request: Request):
     profile      = profiles.get(student_name, {})
     stored       = profile.get("parent_code", "")
     if not stored:
+        _rl_fail(ip)
         return JSONResponse({"ok": False, "error": "No parent code set. Ask your teacher to generate one."}, status_code=401)
     if parent_code != stored:
+        _rl_fail(ip)
         return JSONResponse({"ok": False, "error": "Incorrect parent code"}, status_code=401)
+    _rl_clear(ip)
     session = f"parent:{student_name}"
     return JSONResponse({"ok": True, "session": session, "student_name": student_name})
 
@@ -4867,6 +4909,9 @@ def mobile_parent_notes(request: Request):
 
 @app.post("/api/mobile/student/login")
 async def mobile_student_login(request: Request):
+    ip = request.client.host
+    if _rl_blocked(ip):
+        return JSONResponse({"ok": False, "error": "Too many failed attempts. Try again in 10 minutes."}, status_code=429)
     data         = await request.json()
     student_name = data.get("student_name", "").strip()
     access_code  = data.get("access_code", "").strip()
@@ -4874,9 +4919,12 @@ async def mobile_student_login(request: Request):
     profile      = profiles.get(student_name, {})
     stored       = profile.get("access_code", "")
     if not stored:
+        _rl_fail(ip)
         return JSONResponse({"ok": False, "error": "No access code set. Ask your teacher."}, status_code=401)
     if access_code != stored:
+        _rl_fail(ip)
         return JSONResponse({"ok": False, "error": "Incorrect access code"}, status_code=401)
+    _rl_clear(ip)
     return JSONResponse({"ok": True, "session": f"student:{student_name}", "student_name": student_name})
 
 
